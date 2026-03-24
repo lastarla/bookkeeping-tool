@@ -64,6 +64,8 @@ bookkeeping --help
 
 ### 导入账单
 
+默认会从安装包内读取内置 mappings；如果你需要覆盖映射规则，可以额外传 `--mapping-dir`。
+
 ```bash
 bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool
 ```
@@ -138,8 +140,17 @@ npm run dev
 最常见的一条路径是：
 
 1. 安装 `bookkeeping`
-2. 导入账单文件
-3. 用 CLI 做查询或汇总
-4. 启动本地 Web 看板查看结果
+2. 准备一个运行数据目录（例如 `./bookkeeping-tool-data`）
+3. 导入账单文件
+4. 用 CLI 做查询或汇总
+5. 启动本地 Web 看板查看结果
+
+### 自定义 mappings（可选）
+
+如果你想覆盖内置字段映射，可以准备一个目录，里面放 `csv.json` / `xlsx.json`，然后这样使用：
+
+```bash
+bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool-data --mapping-dir ./my-mappings --json
+```
 
 如果你是开发者，项目结构、运行方式和约束请查看 `.claude/CLAUDE.md`。

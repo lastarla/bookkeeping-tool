@@ -6,7 +6,7 @@ from typing import Any
 
 from server.bookkeeping.db import connect, get_default_db_path, init_db
 from server.bookkeeping.models import TransactionRecord
-from server.bookkeeping.normalizers.field_mapping import load_mapping, normalize_row_fields
+from server.bookkeeping.normalizers.field_mapping import load_mapping_for_source, normalize_row_fields
 from server.bookkeeping.normalizers.transaction import normalize_direction, parse_amount, parse_trade_date_to_ymd
 from server.bookkeeping.parsers.csv_parser import parse_csv_rows
 from server.bookkeeping.parsers.filename_meta import parse_file_meta
@@ -27,6 +27,7 @@ def import_transactions(
     file_path: str | Path,
     db_path: str | Path | None = None,
     original_file_name: str | None = None,
+    mapping_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     project_root = Path(project_root)
     effective_file_path = Path(file_path)
@@ -35,8 +36,7 @@ def import_transactions(
     file_meta = parse_file_meta(effective_file_path)
     file_meta.source_file = str(file_path)
 
-    mapping_path = project_root / "configs" / "mappings" / f"{file_meta.source_type}.json"
-    mapping = load_mapping(mapping_path)
+    mapping = load_mapping_for_source(file_meta.source_type, mapping_dir)
 
     file_hash = sha256_file(file_meta.source_file)
 

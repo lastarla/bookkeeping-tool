@@ -22,6 +22,5 @@ bookkeeping = "server.bookkeeping.cli.app:main"
 [tool.setuptools]
 package-dir = {"" = "."}
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["server", "server.*"]
+[tool.setuptools.package-data]
+"server.configs.mappings" = ["*.json"]

@@ -12,8 +12,9 @@ def register(app: typer.Typer) -> None:
     @app.command("import")
     def import_command(
         file_path: str = typer.Argument(..., help="账单文件路径，支持 CSV/XLSX"),
-        project_root: str | None = typer.Option(None, "--project-root", help="项目根目录，默认自动推导"),
+        project_root: str | None = typer.Option(None, "--project-root", help="运行数据目录，默认自动推导"),
         db: str | None = typer.Option(None, "--db", help="SQLite 数据库文件路径"),
+        mapping_dir: str | None = typer.Option(None, "--mapping-dir", help="自定义 mappings 目录，默认读取安装包内置映射"),
         original_file_name: str | None = typer.Option(None, "--original-file-name", help="覆盖用于解析 owner/platform 的原始文件名"),
         as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
     ) -> None:
@@ -28,6 +29,7 @@ def register(app: typer.Typer) -> None:
                 file_path=source_path,
                 db_path=resolve_db_path(resolved_project_root, db),
                 original_file_name=original_file_name,
+                mapping_dir=mapping_dir,
             )
         except Exception as exc:
             fail(f"导入失败：{exc}")
