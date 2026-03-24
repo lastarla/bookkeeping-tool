@@ -42,7 +42,7 @@
 - `bookkeeping reset --yes`
 
 ### Web 后端
-- CLI 方式：`bookkeeping serve --project-root ./bookkeeping_tool`
+- CLI 方式：`bookkeeping serve --project-root ./bookkeeping-tool`
 - 直接运行：`python -m server.run`
 
 ### 前端开发
@@ -60,7 +60,7 @@
 ## 提交与忽略
 不要提交：
 - `.venv/`
-- `bookkeeping_tool.egg-info/`
+- `*.egg-info/`
 - `server/data/`
 - `frontend/node_modules/`
 - `frontend/dist/`

@@ -1,4 +1,4 @@
-# bookkeeping_tool
+# bookkeeping-tool
 
 一个本地账单导入、标准化、查询与可视化工具。
 
@@ -20,7 +20,7 @@
 ### 方案一：pipx 安装（推荐）
 
 ```bash
-pipx install "git+https://github.com/<org>/bookkeeping_tool.git"
+pipx install "git+https://github.com/<org>/bookkeeping-tool.git"
 ```
 
 安装后验证：
@@ -34,7 +34,7 @@ bookkeeping --help
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install "git+https://github.com/<org>/bookkeeping_tool.git"
+python -m pip install "git+https://github.com/<org>/bookkeeping-tool.git"
 ```
 
 安装后验证：
@@ -65,31 +65,31 @@ bookkeeping --help
 ### 导入账单
 
 ```bash
-bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping_tool
+bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool
 ```
 
 ### 查询交易
 
 ```bash
-bookkeeping query --project-root ./bookkeeping_tool --owner example --platform alipay --limit 5 --json
+bookkeeping query --project-root ./bookkeeping-tool --owner example --platform alipay --limit 5 --json
 ```
 
 ### 汇总概览
 
 ```bash
-bookkeeping summary overview --project-root ./bookkeeping_tool --view monthly --month 2025-03 --json
+bookkeeping summary overview --project-root ./bookkeeping-tool --view monthly --month 2025-03 --json
 ```
 
 ### 启动本地服务
 
 ```bash
-bookkeeping serve --project-root ./bookkeeping_tool
+bookkeeping serve --project-root ./bookkeeping-tool
 ```
 
 ### 清空数据库
 
 ```bash
-bookkeeping reset --project-root ./bookkeeping_tool --yes
+bookkeeping reset --project-root ./bookkeeping-tool --yes
 ```
 
 ## Web 看板
@@ -102,7 +102,7 @@ bookkeeping reset --project-root ./bookkeeping_tool --yes
 ### 启动后端
 
 ```bash
-cd ./bookkeeping_tool
+cd ./bookkeeping-tool
 python -m server.run
 ```
 
@@ -114,7 +114,7 @@ python -m server.run
 ### 启动前端
 
 ```bash
-cd ./bookkeeping_tool/frontend
+cd ./bookkeeping-tool/frontend
 npm install
 npm run dev
 ```
