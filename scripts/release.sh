@@ -99,6 +99,7 @@ generate_resource_block() {
 import ast
 import json
 import re
+import socket
 import sys
 import urllib.parse
 import urllib.request
@@ -109,6 +110,7 @@ PYPROJECT_FILE = Path(sys.argv[1])
 PYTHON_VERSION = "3.12"
 TARGET_EXTRA = {"standard"}
 TARGET_SYS_PLATFORM = sys.platform
+HTTP_TIMEOUT = 10
 
 text = PYPROJECT_FILE.read_text()
 match = re.search(r'dependencies\s*=\s*\[(.*?)\n\]', text, re.S)
@@ -388,11 +390,14 @@ def version_satisfies(version, specifiers):
 def fetch_package(name: str):
     encoded = urllib.parse.quote(name, safe="")
     url = f"https://pypi.org/pypi/{encoded}/json"
+    print(f"PROCESS {name}", file=sys.stderr)
     try:
-        with urllib.request.urlopen(url) as resp:
+        with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as resp:
             return json.load(resp)
-    except Exception as exc:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, socket.timeout) as exc:
         raise SystemExit(f"Failed to fetch PyPI metadata for {name}: {url}: {exc}") from exc
+    except Exception as exc:
+        raise SystemExit(f"Unexpected error while fetching PyPI metadata for {name}: {url}: {exc}") from exc
 
 
 def choose_release(name: str, specifiers):
