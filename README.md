@@ -159,12 +159,14 @@ sh ./scripts/build-release.sh
 - 已执行 `gh auth login`
 - `bookkeeping-tool` 和 `homebrew-tap` 都已配置 GitHub SSH push 权限
 - `homebrew-tap` 位于 `../homebrew-tap`
-- 两个仓库工作区都必须是干净状态
+- 执行前，`bookkeeping-tool` 和 `homebrew-tap` 两个仓库工作区都必须是干净状态
 
-使用方式：
+日常使用步骤：
 
-1. 先修改 `pyproject.toml` 中的版本号
-2. 在仓库根目录执行：
+1. 在 `bookkeeping-tool` 修改代码
+2. 更新 `pyproject.toml` 中的版本号
+3. 先手动提交 `bookkeeping-tool` 当前版本的所有改动
+4. 在仓库根目录执行：
 
 ```bash
 ./scripts/release.sh
@@ -177,8 +179,22 @@ sh ./scripts/build-release.sh
 3. 创建并 push 对应 tag
 4. 用 `gh` 创建 GitHub Release
 5. 下载 release tarball 并计算 sha256
-6. 更新 `../homebrew-tap/Formula/bookkeeping-tool.rb`
-7. 提交并 push `homebrew-tap`
+6. 更新并提交 `../homebrew-tap/Formula/bookkeeping-tool.rb`
+7. push `homebrew-tap`
+
+发版完成后可验证：
+
+```bash
+brew install lastarla/tap/bookkeeping-tool
+bookkeeping --help
+```
+
+如果本机已经安装过旧版本，也可以：
+
+```bash
+brew upgrade bookkeeping-tool
+bookkeeping --help
+```
 
 开发结构、运行方式、构建和发布流程见：
 

@@ -7,7 +7,6 @@ PYPROJECT_FILE="$ROOT_DIR/pyproject.toml"
 FORMULA_FILE="$TAP_DIR/Formula/bookkeeping-tool.rb"
 REPO="lastarla/bookkeeping-tool"
 CURRENT_BRANCH="$(git -C "$ROOT_DIR" branch --show-current)"
-ALLOWED_ROOT_FILES=("README.md" "scripts/release.sh")
 
 fail() {
   echo "Error: $*" >&2
@@ -20,32 +19,6 @@ require_command() {
 
 ensure_git_repo() {
   git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "Not a git repository: $1"
-}
-
-ensure_release_ready_root_repo() {
-  local status path allowed
-  while IFS= read -r status_line; do
-    [ -n "$status_line" ] || continue
-    path="${status_line:3}"
-    allowed=0
-    for allowed_path in "${ALLOWED_ROOT_FILES[@]}"; do
-      if [ "$path" = "$allowed_path" ]; then
-        allowed=1
-        break
-      fi
-    done
-    [ "$allowed" -eq 1 ] || fail "bookkeeping-tool has unrelated uncommitted change: $path"
-  done < <(git -C "$ROOT_DIR" status --porcelain)
-
-  git -C "$ROOT_DIR" diff --quiet --cached -- README.md scripts/release.sh || true
-  git -C "$ROOT_DIR" diff --quiet -- README.md scripts/release.sh || true
-
-  for required_path in "${ALLOWED_ROOT_FILES[@]}"; do
-    git -C "$ROOT_DIR" diff --quiet -- "$required_path" && git -C "$ROOT_DIR" diff --cached --quiet -- "$required_path" && continue
-    return 0
-  done
-
-  fail "No releasable changes found in bookkeeping-tool"
 }
 
 ensure_clean_repo() {
@@ -87,13 +60,15 @@ formula = pathlib.Path(sys.argv[1])
 version = sys.argv[2]
 sha = sys.argv[3]
 text = formula.read_text()
-text = re.sub(
+updated = re.sub(
     r'url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v[^"]+\.tar\.gz"',
     f'url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v{version}.tar.gz"',
     text,
 )
-text = re.sub(r'sha256 "[0-9a-f]{64}"', f'sha256 "{sha}"', text)
-formula.write_text(text)
+updated = re.sub(r'sha256 "[0-9a-f]{64}"', f'sha256 "{sha}"', updated)
+if updated == text:
+    raise SystemExit("Formula did not change; aborting")
+formula.write_text(updated)
 PY
 }
 
@@ -110,7 +85,7 @@ require_command python3
 
 ensure_git_repo "$ROOT_DIR"
 ensure_git_repo "$TAP_DIR"
-ensure_release_ready_root_repo
+ensure_clean_repo "$ROOT_DIR" "bookkeeping-tool"
 ensure_clean_repo "$TAP_DIR" "homebrew-tap"
 
 gh auth status >/dev/null 2>&1 || fail "gh auth status failed; run 'gh auth login' first"
@@ -119,20 +94,12 @@ VERSION="$(version_from_pyproject)"
 TAG="v$VERSION"
 ARCHIVE_URL="https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/$TAG.tar.gz"
 ARCHIVE_FILE="/tmp/bookkeeping-tool-$TAG.tar.gz"
+TAP_BRANCH="$(git -C "$TAP_DIR" branch --show-current)"
 
+[ -n "$TAP_BRANCH" ] || fail "Could not determine homebrew-tap current branch"
 ensure_tag_absent "$ROOT_DIR" "$TAG"
 
-echo "==> Committing release changes"
-git -C "$ROOT_DIR" add README.md scripts/release.sh
-git -C "$ROOT_DIR" commit -m "$(cat <<EOF
-Add local release automation.
-
-Document the local release flow and add a script that creates a GitHub release and updates the Homebrew tap.
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
-EOF
-)"
-
+echo "==> Releasing version $VERSION from branch $CURRENT_BRANCH"
 echo "==> Building release artifacts"
 "$ROOT_DIR/scripts/build-release.sh"
 
@@ -165,7 +132,7 @@ Point the Homebrew formula at the published $TAG release tarball and refresh its
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 EOF
 )"
-git -C "$TAP_DIR" push origin "$(git -C "$TAP_DIR" branch --show-current)"
+git -C "$TAP_DIR" push origin "$TAP_BRANCH"
 
 echo "==> Done"
 echo "Version: $VERSION"
