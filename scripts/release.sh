@@ -552,7 +552,13 @@ echo "==> Archive URL: $ARCHIVE_URL"
 echo "==> Tap repo: $TAP_DIR ($TAP_BRANCH)"
 
 echo "==> Generating Python resources"
-generate_resource_block >"$RESOURCE_FILE" 2>"$RESOURCE_STDERR_FILE"
+if ! generate_resource_block >"$RESOURCE_FILE" 2>"$RESOURCE_STDERR_FILE"; then
+  echo "Error: failed to generate Python resources" >&2
+  if [ -f "$RESOURCE_STDERR_FILE" ]; then
+    cat "$RESOURCE_STDERR_FILE" >&2
+  fi
+  exit 1
+fi
 RESOURCE_COUNT="$(python3 - <<'PY' "$RESOURCE_STDERR_FILE"
 import pathlib
 import re
