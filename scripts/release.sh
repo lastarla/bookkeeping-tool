@@ -333,25 +333,25 @@ def parse_requirement(raw: str):
     specifiers = []
     selected_op = None
     spec_text = ""
+    match = re.match(r'^([A-Za-z0-9_.-]+)(.*)$', raw)
+    if not match:
+        raise SystemExit(f"Unable to parse requirement: {raw}")
+    name = match.group(1).strip()
+    spec_text = match.group(2).strip()
     for op in OPS:
-        marker_index = raw.find(op)
-        if marker_index == -1:
-            continue
-        name = raw[:marker_index].strip()
-        spec_text = raw[marker_index:]
-        selected_op = op
-        break
+        if spec_text.startswith(op):
+            selected_op = op
+            break
     else:
         name = raw.strip()
     specifiers = []
+    if selected_op and spec_text.startswith(selected_op):
+        spec_text = spec_text[len(selected_op):]
     if spec_text:
         pieces = [piece.strip() for piece in spec_text.split(',') if piece.strip()]
         if pieces:
             first_piece = pieces[0]
-            if first_piece.startswith(selected_op):
-                specifiers.append((selected_op, first_piece[len(selected_op):].strip()))
-            else:
-                specifiers.append((selected_op, first_piece.strip()))
+            specifiers.append((selected_op, first_piece.strip()))
         for piece in pieces[1:]:
             for candidate in OPS:
                 if piece.startswith(candidate):
@@ -387,8 +387,12 @@ def version_satisfies(version, specifiers):
 @lru_cache(maxsize=None)
 def fetch_package(name: str):
     encoded = urllib.parse.quote(name, safe="")
-    with urllib.request.urlopen(f"https://pypi.org/pypi/{encoded}/json") as resp:
-        return json.load(resp)
+    url = f"https://pypi.org/pypi/{encoded}/json"
+    try:
+        with urllib.request.urlopen(url) as resp:
+            return json.load(resp)
+    except Exception as exc:
+        raise SystemExit(f"Failed to fetch PyPI metadata for {name}: {url}: {exc}") from exc
 
 
 def choose_release(name: str, specifiers):
@@ -527,13 +531,6 @@ require_command python3
 [ -f "$FORMULA_FILE" ] || fail "Missing formula file: $FORMULA_FILE"
 [ -n "$CURRENT_BRANCH" ] || fail "Could not determine current git branch"
 
-ensure_git_repo "$ROOT_DIR"
-ensure_git_repo "$TAP_DIR"
-ensure_clean_repo "$ROOT_DIR" "bookkeeping-tool"
-ensure_clean_repo "$TAP_DIR" "homebrew-tap"
-
-gh auth status >/dev/null 2>&1 || fail "gh auth status failed; run 'gh auth login' first"
-
 VERSION="$(version_from_pyproject)"
 TAG="v$VERSION"
 ARCHIVE_URL="https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/$TAG.tar.gz"
@@ -543,11 +540,6 @@ RESOURCE_STDERR_FILE="/tmp/bookkeeping-tool-$TAG-resources.stderr"
 TAP_BRANCH="$(git -C "$TAP_DIR" branch --show-current)"
 
 [ -n "$TAP_BRANCH" ] || fail "Could not determine homebrew-tap current branch"
-ensure_tag_absent "$ROOT_DIR" "$TAG"
-
-if [ -z "$RELEASE_NOTES" ]; then
-  RELEASE_NOTES="Release $TAG"
-fi
 
 echo "==> Releasing version $VERSION from branch $CURRENT_BRANCH"
 echo "==> Tag: $TAG"
@@ -569,9 +561,18 @@ echo "==> Resource count: $RESOURCE_COUNT"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "==> Dry run: no changes will be published"
+  echo "==> Dry run note: skipping repo cleanliness, auth, and remote tag checks"
   exit 0
 fi
 
+ensure_git_repo "$ROOT_DIR"
+ensure_git_repo "$TAP_DIR"
+ensure_clean_repo "$ROOT_DIR" "bookkeeping-tool"
+ensure_clean_repo "$TAP_DIR" "homebrew-tap"
+
+gh auth status >/dev/null 2>&1 || fail "gh auth status failed; run 'gh auth login' first"
+
+ensure_tag_absent "$ROOT_DIR" "$TAG"
 if [ "$SKIP_BUILD" -eq 0 ]; then
   echo "==> Building release artifacts"
   "$ROOT_DIR/scripts/build-release.sh"
