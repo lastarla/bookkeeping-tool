@@ -17,10 +17,16 @@
 
 面向普通 CLI 用户，推荐两种方式。
 
-### 方案一：pipx 安装（推荐）
+### 方案一：pipx 安装（推荐，SSH）
 
 ```bash
 pipx install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
+```
+
+如果你当前环境更适合 HTTPS，也可以使用：
+
+```bash
+pipx install "git+https://github.com/lastarla/bookkeeping-tool.git"
 ```
 
 安装后验证：
@@ -29,12 +35,20 @@ pipx install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
 bookkeeping --help
 ```
 
-### 方案二：虚拟环境安装
+### 方案二：虚拟环境安装（SSH）
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
+```
+
+如果你当前环境更适合 HTTPS，也可以使用：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install "git+https://github.com/lastarla/bookkeeping-tool.git"
 ```
 
 安装后验证：
