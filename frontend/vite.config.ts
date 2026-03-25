@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../server/web/static',
+    outDir: '../src/bookkeeping_tool/web/static',
     emptyOutDir: true,
     rollupOptions: {
       output: {

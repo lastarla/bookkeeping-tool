@@ -14,5 +14,7 @@ coverage/
 .vscode/
 .idea/
 *.egg-info/
+data/
 server/data/
+src/bookkeeping_tool/web/static/
 frontend/dist/

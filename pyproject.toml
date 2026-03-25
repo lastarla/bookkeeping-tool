@@ -1,27 +1,108 @@
+# 这段定义“用什么工具来构建这个 Python 包”。
+# 当你执行 `python -m build`、`pip install .`、`pipx install ...` 之类命令时，
+# Python 会先看这里，决定：
+# 1) 构建时要先安装哪些工具
+# 2) 真正负责“把源码变成可安装包”的后端实现是谁
 [build-system]
+
+# 构建阶段需要先准备好的依赖。
+# - setuptools: 负责收集 Python 代码、资源文件、入口命令等，并生成安装包元数据
+# - wheel: 用来生成 .whl 安装包格式
 requires = ["setuptools>=68", "wheel"]
+
+# build-backend 表示“真正执行打包逻辑的后端实现”。
+# 这里的 `setuptools.build_meta` 可以理解成：
+# - 让 setuptools 按 pyproject.toml 里的配置来打包
+# - 生成 sdist / wheel
+# - 让 pip/pipx 在安装时知道该怎么构建这个项目
+# 如果这里换成别的值，就相当于换了另一套打包体系。
+# 当前项目用 setuptools，是最常见、最稳妥的一种方案。
 build-backend = "setuptools.build_meta"
 
+# 这里是项目本身的基础信息。
 [project]
+
+# 发布包名：这是用户安装时看到的名字。
+# 比如：`pip install bookkeeping-tool`
+# 这里可以用连字符，这是 Python 包发布名的常见写法。
 name = "bookkeeping-tool"
+
+# 当前版本号。
+# 以后每次发新版本，一般都会改这里。
 version = "0.1.0"
+
+# 项目简介。
+# 这是包管理工具、包索引页面里会展示的一句简短说明。
 description = "Local bookkeeping data import and normalization tool"
+
+# 要求的最低 Python 版本。
+# 这里表示：Python 3.10 及以上才允许安装。
 requires-python = ">=3.10"
+
+# 运行时依赖：安装 bookkeeping-tool 时，这些库会一起装上。
+# 可以把它理解为“这个项目正常跑起来必须依赖的第三方包”。
 dependencies = [
+  # Web API 框架：提供 HTTP 接口和 docs
   "fastapi>=0.110.0",
+  # 读取 xlsx 文件
   "openpyxl>=3.1.0",
+  # 处理表格数据
   "pandas>=2.0.0",
+  # 支持文件上传
   "python-multipart>=0.0.9",
+  # CLI 命令行框架
   "typer>=0.12.0",
+  # 本地启动 Web 服务
   "uvicorn[standard]>=0.27.0",
 ]
 
+# 这里定义安装完成后生成的命令行命令。
 [project.scripts]
-bookkeeping = "server.bookkeeping.cli.app:main"
 
+# 左边的 `bookkeeping` 是用户终端里输入的命令名。
+# 右边的 `bookkeeping_tool.cli.app:main` 表示：
+# - 进入 Python 包 `bookkeeping_tool`
+# - 找到 `cli/app.py`
+# - 调用其中的 `main()` 函数
+# 所以安装完成后，用户才能直接执行：
+#   bookkeeping --help
+bookkeeping = "bookkeeping_tool.cli.app:main"
+
+# 下面这段是 setuptools 的额外配置。
 [tool.setuptools]
-package-dir = {"" = "."}
 
+# 告诉 setuptools：源码根目录不是项目根目录，而是在 `src/` 下面。
+# 这是标准的 src layout。
+# 好处是能避免项目根目录下的临时文件、旧目录、测试残留被误当成 Python 包打进去。
+package-dir = {"" = "src"}
+
+# 告诉 setuptools 去哪里找要打包的 Python 包。
+[tool.setuptools.packages.find]
+
+# 只在 src/ 里找 Python 包。
+where = ["src"]
+
+# 只把 `bookkeeping_tool` 开头的包打进去。
+# 例如：
+# - bookkeeping_tool
+# - bookkeeping_tool.cli
+# - bookkeeping_tool.web
+include = ["bookkeeping_tool*"]
+
+# 显式排除不应该进入安装包的目录。
+# 这里尤其重要，因为这个项目之前有旧的 server/ 结构和 build/ 残留。
+exclude = ["server*", "frontend*", "build*", "dist*"]
+
+# 这里定义“除了 .py 代码，还要一起打包进去的资源文件”。
+# 因为很多文件不是 Python 代码，但运行时必须存在。
 [tool.setuptools.package-data]
-"server.configs.mappings" = ["*.json"]
-"server.web.static" = ["index.html", "favicon.svg", "assets/*"]
+
+# 默认字段映射配置文件。
+# 这些 json 文件不是代码，但导入账单时要从包内读取，
+# 所以必须跟代码一起打进安装包里。
+"bookkeeping_tool.configs.mappings" = ["*.json"]
+
+# Web 前端静态资源。
+# `bookkeeping serve` 启动后，首页 HTML、favicon、assets 下的 js/css 都要直接从安装包里读取，
+# 所以这些静态文件也必须被一起打包。
+"bookkeeping_tool.web.static" = ["index.html", "favicon.svg", "assets/*"]

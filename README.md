@@ -2,53 +2,20 @@
 
 一个本地账单导入、标准化、查询与可视化工具。
 
-它支持读取 CSV / XLSX 账单文件，将数据清洗后写入 SQLite，并提供命令行查询、汇总和本地 Web 看板。
-
-## 适合做什么
-
-- 导入本地账单文件
-- 自动提取 `owner` / `platform`
-- 避免重复导入同一份文件
-- 查询交易明细
-- 按月份、分类、平台、方向做汇总
-- 在本地浏览收支概览和趋势
+支持导入 CSV / XLSX 账单，写入本地 SQLite，并通过 CLI 和本地 Web 页面查看数据。
 
 ## 安装
 
-面向普通 CLI 用户，推荐两种方式。
-
-### 方案一：pipx 安装（推荐，SSH）
+推荐用 `pipx`：
 
 ```bash
 pipx install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
 ```
 
-如果你当前环境更适合 HTTPS，也可以使用：
+如果你更适合 HTTPS：
 
 ```bash
 pipx install "git+https://github.com/lastarla/bookkeeping-tool.git"
-```
-
-安装后验证：
-
-```bash
-bookkeeping --help
-```
-
-### 方案二：虚拟环境安装（SSH）
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
-```
-
-如果你当前环境更适合 HTTPS，也可以使用：
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install "git+https://github.com/lastarla/bookkeeping-tool.git"
 ```
 
 安装后验证：
@@ -69,17 +36,9 @@ pipx uninstall bookkeeping-tool
 
 ### 卸载虚拟环境安装
 
-如果你是在单独虚拟环境中安装的，直接退出并删除该虚拟环境即可：
-
 ```bash
 deactivate
 rm -rf .venv
-```
-
-如果你只想在当前虚拟环境里卸载包：
-
-```bash
-python -m pip uninstall bookkeeping-tool
 ```
 
 ## 文件命名规则
@@ -97,56 +56,56 @@ python -m pip uninstall bookkeeping-tool
 - `example_alipay_2025.csv` -> `owner=example, platform=alipay`
 - `example_wx_2025.xlsx` -> `owner=example, platform=wx`
 
-## CLI 快速开始
+## 快速开始
 
-### 导入账单
+`--project-root` 表示运行数据根目录。默认解析顺序：
 
-默认会从安装包内读取内置 mappings；如果你需要覆盖映射规则，可以额外传 `--mapping-dir`。
+1. `--project-root`
+2. 环境变量 `BOOKKEEPING_PROJECT_ROOT`
+3. 当前命令执行目录
+
+### 1. 导入账单
 
 ```bash
 bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool-data
 ```
 
-### 查询交易
+### 2. 查询交易
 
 ```bash
-bookkeeping query --project-root ./bookkeeping-tool-data --owner example --platform alipay --limit 5 --json
+bookkeeping query --project-root ./bookkeeping-tool-data --limit 5 --json
 ```
 
-### 汇总概览
+### 3. 查看汇总
 
 ```bash
 bookkeeping summary overview --project-root ./bookkeeping-tool-data --view monthly --month 2025-03 --json
 ```
 
-### 启动完整 Web 页面
+### 4. 启动本地页面
 
 ```bash
 bookkeeping serve --project-root ./bookkeeping-tool-data
 ```
 
-启动后直接打开：
+打开：
 
 - `http://127.0.0.1:8000/`
 - `http://127.0.0.1:8000/docs`
 
-### 清空数据库
+### 5. 清空数据库
 
 ```bash
 bookkeeping reset --project-root ./bookkeeping-tool-data --yes
 ```
 
-## Web 看板
+## 自定义 mappings（可选）
 
-普通用户只需要：
+如果你想覆盖内置字段映射，可以准备一个目录，里面放 `csv.json` / `xlsx.json`：
 
 ```bash
-bookkeeping serve --project-root ./bookkeeping-tool-data
+bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool-data --mapping-dir ./my-mappings --json
 ```
-
-然后在浏览器打开：
-
-- `http://127.0.0.1:8000/`
 
 ## 当前支持的能力
 
@@ -157,38 +116,27 @@ bookkeeping serve --project-root ./bookkeeping-tool-data
 - 按 month / category / owner / platform / direction 汇总
 - 通过 Web 页面查看概览、分类、趋势和交易明细
 
-## 常见使用路径
+## 开发说明
 
-最常见的一条路径是：
-
-1. 安装 `bookkeeping`
-2. 准备一个运行数据目录（例如 `./bookkeeping-tool-data`）
-3. 导入账单文件
-4. 用 CLI 做查询或汇总
-5. 执行 `bookkeeping serve --project-root ./bookkeeping-tool-data`
-6. 在浏览器打开本地页面
-
-### 自定义 mappings（可选）
-
-如果你想覆盖内置字段映射，可以准备一个目录，里面放 `csv.json` / `xlsx.json`，然后这样使用：
+如果你需要一键清理旧产物并重新构建发布包，可以在仓库根目录执行：
 
 ```bash
-bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool-data --mapping-dir ./my-mappings --json
+./scripts/build-release.sh
 ```
 
-## 开发模式
-
-如果你是开发者，前端仍然可以独立运行：
+也可以这样执行：
 
 ```bash
-cd ./bookkeeping-tool/frontend
-npm install
-npm run dev
+sh ./scripts/build-release.sh
 ```
 
-Vite 开发服务默认：
+这个脚本会自动：
 
-- `http://127.0.0.1:5173`
-- `/api` 会代理到 `http://127.0.0.1:8000`
+1. 清理 `build/`、`dist/`、`*.egg-info` 等旧产物
+2. 构建前端静态资源
+3. 执行 `python -m build`
+4. 产出最终发布包到 `dist/`
 
-如果你是开发者，项目结构、运行方式和约束请查看 `.claude/CLAUDE.md`。
+开发结构、运行方式、构建和发布流程见：
+
+- `.claude/CLAUDE.md`
