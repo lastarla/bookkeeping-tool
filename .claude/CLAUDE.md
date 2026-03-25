@@ -84,7 +84,7 @@
 3. 这些静态文件会在后续 `python -m build` 时一起进入 Python 包
 
 #### Python 包单独构建
-1. 回到仓库根目录：`cd /Users/starlee/life_space/book/bookkeeping-tool`
+1. 回到仓库根目录
 2. 如需手动清理：`rm -rf build dist *.egg-info src/bookkeeping_tool.egg-info`
 3. 如果前端有改动，先执行前端构建
 4. 执行：`python -m build`

@@ -50,6 +50,8 @@ PYPROJECT_FILE="$ROOT_DIR/pyproject.toml"
 FORMULA_FILE="$TAP_DIR/Formula/bookkeeping-tool.rb"
 REPO="lastarla/bookkeeping-tool"
 CURRENT_BRANCH="$(git -C "$ROOT_DIR" branch --show-current)"
+RESOURCE_START="# BEGIN PYTHON RESOURCES"
+RESOURCE_END="# END PYTHON RESOURCES"
 
 fail() {
   echo "Error: $*" >&2
@@ -92,23 +94,422 @@ ensure_tag_absent() {
   git -C "$repo_dir" ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1 && fail "Tag already exists on origin: $tag"
 }
 
+generate_resource_block() {
+  python3 - <<'PY' "$PYPROJECT_FILE"
+import ast
+import json
+import re
+import sys
+import urllib.parse
+import urllib.request
+from functools import lru_cache
+from pathlib import Path
+
+PYPROJECT_FILE = Path(sys.argv[1])
+PYTHON_VERSION = "3.12"
+TARGET_EXTRA = {"standard"}
+TARGET_SYS_PLATFORM = sys.platform
+
+text = PYPROJECT_FILE.read_text()
+match = re.search(r'dependencies\s*=\s*\[(.*?)\n\]', text, re.S)
+if not match:
+    raise SystemExit("Unable to find dependencies in pyproject.toml")
+block = re.sub(r'^\s*#.*$', '', match.group(1), flags=re.M)
+requirements = ast.literal_eval("[" + block + "]")
+
+OPS = [">=", "<=", "!=", "==", "~=", ">", "<"]
+PRE_RELEASE_RE = re.compile(r"[A-Za-z]")
+
+
+def normalize_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def split_version(version: str):
+    version = version.replace("-", ".")
+    version = re.sub(r"(?i)(a|b|rc|post|dev)", lambda m: "." + m.group(1).lower() + ".", version)
+    parts = re.split(r"[^0-9A-Za-z]+", version)
+    normalized = []
+    for part in parts:
+        if not part:
+            continue
+        if part.isdigit():
+            normalized.append((0, int(part)))
+        else:
+            normalized.append((1, part.lower()))
+    return tuple(normalized)
+
+
+def is_prerelease(version: str) -> bool:
+    return bool(PRE_RELEASE_RE.search(version))
+
+
+class MarkerParser:
+    def __init__(self, text: str):
+        self.tokens = self.tokenize(text)
+        self.index = 0
+
+    def tokenize(self, text: str):
+        tokens = []
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch.isspace():
+                i += 1
+                continue
+            if text.startswith("and", i) and self._boundary(text, i, 3):
+                tokens.append(("AND", "and"))
+                i += 3
+                continue
+            if text.startswith("or", i) and self._boundary(text, i, 2):
+                tokens.append(("OR", "or"))
+                i += 2
+                continue
+            if text.startswith("not", i) and self._boundary(text, i, 3):
+                tokens.append(("NOT", "not"))
+                i += 3
+                continue
+            if ch in "()":
+                tokens.append((ch, ch))
+                i += 1
+                continue
+            if text.startswith("==", i) or text.startswith("!=", i) or text.startswith(">=", i) or text.startswith("<=", i):
+                tokens.append(("OP", text[i:i+2]))
+                i += 2
+                continue
+            if ch in "<>":
+                tokens.append(("OP", ch))
+                i += 1
+                continue
+            if ch in {'"', "'"}:
+                quote = ch
+                i += 1
+                start = i
+                while i < len(text) and text[i] != quote:
+                    i += 1
+                if i >= len(text):
+                    raise SystemExit(f"Unterminated string in marker: {text}")
+                tokens.append(("STRING", text[start:i]))
+                i += 1
+                continue
+            start = i
+            while i < len(text) and re.match(r"[A-Za-z0-9_.-]", text[i]):
+                i += 1
+            if start == i:
+                raise SystemExit(f"Unexpected marker token near: {text[i:]}")
+            tokens.append(("IDENT", text[start:i]))
+        return tokens
+
+    def _boundary(self, text, start, size):
+        before = start == 0 or not re.match(r"[A-Za-z0-9_]", text[start - 1])
+        after_index = start + size
+        after = after_index >= len(text) or not re.match(r"[A-Za-z0-9_]", text[after_index])
+        return before and after
+
+    def current(self):
+        if self.index >= len(self.tokens):
+            return None
+        return self.tokens[self.index]
+
+    def eat(self, kind=None, value=None):
+        token = self.current()
+        if token is None:
+            raise SystemExit("Unexpected end of marker")
+        if kind is not None and token[0] != kind:
+            raise SystemExit(f"Expected {kind}, got {token}")
+        if value is not None and token[1] != value:
+            raise SystemExit(f"Expected {value}, got {token}")
+        self.index += 1
+        return token
+
+    def parse(self):
+        expr = self.parse_or()
+        if self.current() is not None:
+            raise SystemExit(f"Unexpected token in marker: {self.current()}")
+        return expr
+
+    def parse_or(self):
+        node = self.parse_and()
+        while self.current() and self.current()[0] == "OR":
+            self.eat("OR")
+            node = ("or", node, self.parse_and())
+        return node
+
+    def parse_and(self):
+        node = self.parse_not()
+        while self.current() and self.current()[0] == "AND":
+            self.eat("AND")
+            node = ("and", node, self.parse_not())
+        return node
+
+    def parse_not(self):
+        if self.current() and self.current()[0] == "NOT":
+            self.eat("NOT")
+            return ("not", self.parse_not())
+        return self.parse_atom()
+
+    def parse_atom(self):
+        token = self.current()
+        if token and token[0] == "(":
+            self.eat("(")
+            node = self.parse_or()
+            self.eat(")")
+            return node
+        ident = self.eat("IDENT")[1]
+        op = self.eat("OP")[1]
+        value = self.eat("STRING")[1]
+        return ("cmp", ident, op, value)
+
+
+def eval_marker(node, extra_context=None):
+    extra_context = extra_context or set()
+    kind = node[0]
+    if kind == "or":
+        return eval_marker(node[1], extra_context) or eval_marker(node[2], extra_context)
+    if kind == "and":
+        return eval_marker(node[1], extra_context) and eval_marker(node[2], extra_context)
+    if kind == "not":
+        return not eval_marker(node[1], extra_context)
+    _, ident, op, value = node
+    ident = ident.replace(".", "_")
+    if ident == "extra":
+        left = extra_context
+        return compare_extra(left, op, value)
+    if ident == "python_version":
+        left = PYTHON_VERSION
+    elif ident == "sys_platform":
+        left = TARGET_SYS_PLATFORM
+    else:
+        return True
+    return compare_value(left, op, value)
+
+
+def compare_extra(values, op, value):
+    if op == "==":
+        return value in values
+    if op == "!=":
+        return value not in values
+    return False
+
+
+def compare_value(left, op, right):
+    if op in {"==", "!="}:
+        result = left == right
+        return result if op == "==" else not result
+    left_key = split_version(left)
+    right_key = split_version(right)
+    if op == ">=":
+        return left_key >= right_key
+    if op == "<=":
+        return left_key <= right_key
+    if op == ">":
+        return left_key > right_key
+    if op == "<":
+        return left_key < right_key
+    if op == "~=":
+        parts = right.split(".")
+        if len(parts) == 1:
+            upper = str(int(parts[0]) + 1)
+        else:
+            prefix = parts[:-1]
+            prefix[-1] = str(int(prefix[-1]) + 1)
+            upper = ".".join(prefix)
+        return left_key >= right_key and left_key < split_version(upper)
+    return True
+
+
+def parse_requirement(raw: str):
+    raw = raw.strip()
+    marker = None
+    if ";" in raw:
+        raw, marker = [part.strip() for part in raw.split(";", 1)]
+    extras = set()
+    if "[" in raw and "]" in raw:
+        name_part, rest = raw.split("[", 1)
+        extras_text, remainder = rest.split("]", 1)
+        extras = {item.strip() for item in extras_text.split(",") if item.strip()}
+        raw = name_part + remainder
+    name = raw
+    specifiers = []
+    selected_op = None
+    spec_text = ""
+    for op in OPS:
+        marker_index = raw.find(op)
+        if marker_index == -1:
+            continue
+        name = raw[:marker_index].strip()
+        spec_text = raw[marker_index:]
+        selected_op = op
+        break
+    else:
+        name = raw.strip()
+    specifiers = []
+    if spec_text:
+        pieces = [piece.strip() for piece in spec_text.split(',') if piece.strip()]
+        if pieces:
+            first_piece = pieces[0]
+            if first_piece.startswith(selected_op):
+                specifiers.append((selected_op, first_piece[len(selected_op):].strip()))
+            else:
+                specifiers.append((selected_op, first_piece.strip()))
+        for piece in pieces[1:]:
+            for candidate in OPS:
+                if piece.startswith(candidate):
+                    specifiers.append((candidate, piece[len(candidate):].strip()))
+                    break
+    marker_ast = MarkerParser(marker).parse() if marker else None
+    return {
+        'name': normalize_name(name),
+        'extras': extras,
+        'specifiers': specifiers,
+        'marker': marker_ast,
+        'raw': raw,
+    }
+
+
+def merge_specifiers(existing, incoming):
+    merged = list(existing)
+    for item in incoming:
+        if item not in merged:
+            merged.append(item)
+    return merged
+
+
+def version_satisfies(version, specifiers):
+    if is_prerelease(version):
+        return False
+    for op, expected in specifiers:
+        if not compare_value(version, op, expected):
+            return False
+    return True
+
+
+@lru_cache(maxsize=None)
+def fetch_package(name: str):
+    encoded = urllib.parse.quote(name, safe="")
+    with urllib.request.urlopen(f"https://pypi.org/pypi/{encoded}/json") as resp:
+        return json.load(resp)
+
+
+def choose_release(name: str, specifiers):
+    data = fetch_package(name)
+    releases = data.get('releases', {})
+    candidates = []
+    for version, files in releases.items():
+        if not version_satisfies(version, specifiers):
+            continue
+        sdist = next((item for item in files if item.get('packagetype') == 'sdist'), None)
+        if not sdist:
+            continue
+        candidates.append((split_version(version), version, sdist))
+    if not candidates:
+        raise SystemExit(f"No stable sdist release found for {name} matching {specifiers}")
+    candidates.sort()
+    _, version, sdist = candidates[-1]
+    return version, sdist
+
+
+def evaluate_marker(marker_ast, extras):
+    if marker_ast is None:
+        return True
+    return eval_marker(marker_ast, extras)
+
+
+constraints = {}
+selected_versions = {}
+resource_entries = {}
+queue = []
+
+for requirement in requirements:
+    parsed = parse_requirement(requirement)
+    name = parsed['name']
+    entry = constraints.setdefault(name, {'specifiers': [], 'extras': set()})
+    entry['specifiers'] = merge_specifiers(entry['specifiers'], parsed['specifiers'])
+    entry['extras'].update(parsed['extras'])
+    queue.append(name)
+
+processed = set()
+while queue:
+    name = queue.pop(0)
+    entry = constraints[name]
+    version, sdist = choose_release(name, entry['specifiers'])
+    previous_version = selected_versions.get(name)
+    selected_versions[name] = version
+    resource_entries[name] = {
+        'version': version,
+        'url': sdist['url'],
+        'sha256': sdist['digests']['sha256'],
+    }
+    if name in processed and previous_version == version:
+        continue
+    processed.add(name)
+    package = fetch_package(name)
+    requires_dist = package['info'].get('requires_dist') or []
+    active_extras = set(entry['extras'])
+    for raw_req in requires_dist:
+        parsed = parse_requirement(raw_req)
+        if not evaluate_marker(parsed['marker'], active_extras):
+            continue
+        dep_name = parsed['name']
+        dep_entry = constraints.setdefault(dep_name, {'specifiers': [], 'extras': set()})
+        before = (tuple(dep_entry['specifiers']), tuple(sorted(dep_entry['extras'])))
+        dep_entry['specifiers'] = merge_specifiers(dep_entry['specifiers'], parsed['specifiers'])
+        dep_entry['extras'].update(parsed['extras'])
+        after = (tuple(dep_entry['specifiers']), tuple(sorted(dep_entry['extras'])))
+        if before != after or dep_name not in processed:
+            queue.append(dep_name)
+
+names = sorted(resource_entries)
+print('# BEGIN PYTHON RESOURCES')
+for name in names:
+    entry = resource_entries[name]
+    print(f'  resource "{name}" do')
+    print(f'    url "{entry["url"]}"')
+    print(f'    sha256 "{entry["sha256"]}"')
+    print('  end')
+    print()
+print('# END PYTHON RESOURCES')
+print(f'# RESOURCE COUNT: {len(names)}', file=sys.stderr)
+PY
+}
+
 update_formula() {
   local version="$1"
   local sha="$2"
-  python3 - <<'PY' "$FORMULA_FILE" "$version" "$sha"
+  local resource_block="$3"
+  python3 - <<'PY' "$FORMULA_FILE" "$version" "$sha" "$resource_block" "$RESOURCE_START" "$RESOURCE_END"
 import pathlib
 import re
 import sys
+
 formula = pathlib.Path(sys.argv[1])
 version = sys.argv[2]
 sha = sys.argv[3]
+resource_block = pathlib.Path(sys.argv[4]).read_text().rstrip() + "\n"
+resource_start = sys.argv[5]
+resource_end = sys.argv[6]
 text = formula.read_text()
+
 updated = re.sub(
     r'url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v[^"]+\.tar\.gz"',
     f'url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v{version}.tar.gz"',
     text,
+    count=1,
 )
-updated = re.sub(r'sha256 "[0-9a-f]{64}"', f'sha256 "{sha}"', updated)
+updated = re.sub(
+    r'(url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v[^"]+\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}(")',
+    rf'\g<1>{sha}\2',
+    updated,
+    count=1,
+)
+pattern = re.compile(
+    rf'{re.escape(resource_start)}\n.*?\n{re.escape(resource_end)}',
+    re.S,
+)
+if not pattern.search(updated):
+    raise SystemExit("Formula resource block markers not found")
+updated = pattern.sub(resource_block.rstrip(), updated, count=1)
+updated += "\n" if not updated.endswith("\n") else ""
 if updated == text:
     raise SystemExit("Formula did not change; aborting")
 formula.write_text(updated)
@@ -137,6 +538,8 @@ VERSION="$(version_from_pyproject)"
 TAG="v$VERSION"
 ARCHIVE_URL="https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/$TAG.tar.gz"
 ARCHIVE_FILE="/tmp/bookkeeping-tool-$TAG.tar.gz"
+RESOURCE_FILE="/tmp/bookkeeping-tool-$TAG-resources.rb"
+RESOURCE_STDERR_FILE="/tmp/bookkeeping-tool-$TAG-resources.stderr"
 TAP_BRANCH="$(git -C "$TAP_DIR" branch --show-current)"
 
 [ -n "$TAP_BRANCH" ] || fail "Could not determine homebrew-tap current branch"
@@ -150,6 +553,19 @@ echo "==> Releasing version $VERSION from branch $CURRENT_BRANCH"
 echo "==> Tag: $TAG"
 echo "==> Archive URL: $ARCHIVE_URL"
 echo "==> Tap repo: $TAP_DIR ($TAP_BRANCH)"
+
+echo "==> Generating Python resources"
+generate_resource_block >"$RESOURCE_FILE" 2>"$RESOURCE_STDERR_FILE"
+RESOURCE_COUNT="$(python3 - <<'PY' "$RESOURCE_STDERR_FILE"
+import pathlib
+import re
+import sys
+text = pathlib.Path(sys.argv[1]).read_text()
+match = re.search(r'RESOURCE COUNT: (\d+)', text)
+print(match.group(1) if match else 'unknown')
+PY
+)"
+echo "==> Resource count: $RESOURCE_COUNT"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "==> Dry run: no changes will be published"
@@ -181,13 +597,13 @@ curl -L "$ARCHIVE_URL" -o "$ARCHIVE_FILE"
 SHA256="$(shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}')"
 
 echo "==> Updating Homebrew formula"
-update_formula "$VERSION" "$SHA256"
+update_formula "$VERSION" "$SHA256" "$RESOURCE_FILE"
 
 git -C "$TAP_DIR" add Formula/bookkeeping-tool.rb
 git -C "$TAP_DIR" commit -m "$(cat <<EOF
 Update bookkeeping-tool formula to $TAG.
 
-Point the Homebrew formula at the published $TAG release tarball and refresh its sha256.
+Point the Homebrew formula at the published $TAG release tarball, refresh its sha256, and regenerate Python resources.
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 EOF
@@ -199,3 +615,4 @@ echo "Version: $VERSION"
 echo "Tag: $TAG"
 echo "Release: https://github.com/lastarla/bookkeeping-tool/releases/tag/$TAG"
 echo "Formula SHA256: $SHA256"
+echo "Resource count: $RESOURCE_COUNT"
