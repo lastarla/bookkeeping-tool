@@ -42,6 +42,13 @@ bookkeeping --help
 
 ## 卸载
 
+### 卸载 Homebrew 安装
+
+```bash
+brew uninstall bookkeeping-tool
+brew untap lastarla/tap  # 可选：不再需要该 tap 时
+```
+
 ### 卸载 pipx 安装
 
 ```bash
@@ -194,6 +201,26 @@ bookkeeping --help
 ```bash
 brew upgrade bookkeeping-tool
 bookkeeping --help
+```
+
+常用参数：
+
+- 预演（不发布）：
+
+```bash
+./scripts/release.sh --dry-run
+```
+
+- 跳过构建（只走发布链路）：
+
+```bash
+./scripts/release.sh --skip-build
+```
+
+- 自定义 GitHub Release 文案：
+
+```bash
+./scripts/release.sh --notes "Release v0.1.1"
 ```
 
 开发结构、运行方式、构建和发布流程见：

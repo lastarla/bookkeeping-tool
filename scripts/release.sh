@@ -1,6 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/release.sh [options]
+
+Options:
+  --dry-run           Run preflight checks and print the plan without publishing.
+  --skip-build        Skip ./scripts/build-release.sh.
+  --notes <text>      Release notes text passed to gh release create.
+  --help              Show this help.
+EOF
+}
+
+DRY_RUN=0
+SKIP_BUILD=0
+RELEASE_NOTES=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --skip-build)
+      SKIP_BUILD=1
+      shift
+      ;;
+    --notes)
+      [ $# -ge 2 ] || { usage; exit 2; }
+      RELEASE_NOTES="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TAP_DIR="$(cd "$ROOT_DIR/.." && pwd)/homebrew-tap"
 PYPROJECT_FILE="$ROOT_DIR/pyproject.toml"
@@ -99,9 +142,26 @@ TAP_BRANCH="$(git -C "$TAP_DIR" branch --show-current)"
 [ -n "$TAP_BRANCH" ] || fail "Could not determine homebrew-tap current branch"
 ensure_tag_absent "$ROOT_DIR" "$TAG"
 
+if [ -z "$RELEASE_NOTES" ]; then
+  RELEASE_NOTES="Release $TAG"
+fi
+
 echo "==> Releasing version $VERSION from branch $CURRENT_BRANCH"
-echo "==> Building release artifacts"
-"$ROOT_DIR/scripts/build-release.sh"
+echo "==> Tag: $TAG"
+echo "==> Archive URL: $ARCHIVE_URL"
+echo "==> Tap repo: $TAP_DIR ($TAP_BRANCH)"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "==> Dry run: no changes will be published"
+  exit 0
+fi
+
+if [ "$SKIP_BUILD" -eq 0 ]; then
+  echo "==> Building release artifacts"
+  "$ROOT_DIR/scripts/build-release.sh"
+else
+  echo "==> Skipping build step"
+fi
 
 echo "==> Pushing $CURRENT_BRANCH"
 git -C "$ROOT_DIR" push origin "$CURRENT_BRANCH"
@@ -114,7 +174,7 @@ echo "==> Creating GitHub release"
 gh release create "$TAG" \
   --repo "$REPO" \
   --title "$TAG" \
-  --notes "Release $TAG"
+  --notes "$RELEASE_NOTES"
 
 echo "==> Downloading release tarball"
 curl -L "$ARCHIVE_URL" -o "$ARCHIVE_FILE"
