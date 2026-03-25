@@ -10,6 +10,8 @@ export default defineConfig({
     },
   },
   build: {
+    outDir: '../server/web/static',
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks(id) {

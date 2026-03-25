@@ -24,3 +24,4 @@ package-dir = {"" = "."}
 
 [tool.setuptools.package-data]
 "server.configs.mappings" = ["*.json"]
+"server.web.static" = ["index.html", "favicon.svg", "assets/*"]

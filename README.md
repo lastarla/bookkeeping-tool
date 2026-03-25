@@ -20,7 +20,7 @@
 ### 方案一：pipx 安装（推荐）
 
 ```bash
-pipx install "git+https://github.com/<org>/bookkeeping-tool.git"
+pipx install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
 ```
 
 安装后验证：
@@ -34,7 +34,7 @@ bookkeeping --help
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install "git+https://github.com/<org>/bookkeeping-tool.git"
+python -m pip install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
 ```
 
 安装后验证：
@@ -67,64 +67,49 @@ bookkeeping --help
 默认会从安装包内读取内置 mappings；如果你需要覆盖映射规则，可以额外传 `--mapping-dir`。
 
 ```bash
-bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool
+bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool-data
 ```
 
 ### 查询交易
 
 ```bash
-bookkeeping query --project-root ./bookkeeping-tool --owner example --platform alipay --limit 5 --json
+bookkeeping query --project-root ./bookkeeping-tool-data --owner example --platform alipay --limit 5 --json
 ```
 
 ### 汇总概览
 
 ```bash
-bookkeeping summary overview --project-root ./bookkeeping-tool --view monthly --month 2025-03 --json
+bookkeeping summary overview --project-root ./bookkeeping-tool-data --view monthly --month 2025-03 --json
 ```
 
-### 启动本地服务
+### 启动完整 Web 页面
 
 ```bash
-bookkeeping serve --project-root ./bookkeeping-tool
+bookkeeping serve --project-root ./bookkeeping-tool-data
 ```
+
+启动后直接打开：
+
+- `http://127.0.0.1:8000/`
+- `http://127.0.0.1:8000/docs`
 
 ### 清空数据库
 
 ```bash
-bookkeeping reset --project-root ./bookkeeping-tool --yes
+bookkeeping reset --project-root ./bookkeeping-tool-data --yes
 ```
 
 ## Web 看板
 
-项目同时提供本地 Web 看板：
-
-- 后端：FastAPI
-- 前端：React + TypeScript + Vite
-
-### 启动后端
+普通用户只需要：
 
 ```bash
-cd ./bookkeeping-tool
-python -m server.run
+bookkeeping serve --project-root ./bookkeeping-tool-data
 ```
 
-默认地址：
+然后在浏览器打开：
 
-- `http://127.0.0.1:8000`
-- `http://127.0.0.1:8000/docs`
-
-### 启动前端
-
-```bash
-cd ./bookkeeping-tool/frontend
-npm install
-npm run dev
-```
-
-开发模式下：
-
-- 前端默认 `http://127.0.0.1:5173`
-- `/api` 会代理到 `http://127.0.0.1:8000`
+- `http://127.0.0.1:8000/`
 
 ## 当前支持的能力
 
@@ -143,7 +128,8 @@ npm run dev
 2. 准备一个运行数据目录（例如 `./bookkeeping-tool-data`）
 3. 导入账单文件
 4. 用 CLI 做查询或汇总
-5. 启动本地 Web 看板查看结果
+5. 执行 `bookkeeping serve --project-root ./bookkeeping-tool-data`
+6. 在浏览器打开本地页面
 
 ### 自定义 mappings（可选）
 
@@ -152,5 +138,20 @@ npm run dev
 ```bash
 bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-tool-data --mapping-dir ./my-mappings --json
 ```
+
+## 开发模式
+
+如果你是开发者，前端仍然可以独立运行：
+
+```bash
+cd ./bookkeeping-tool/frontend
+npm install
+npm run dev
+```
+
+Vite 开发服务默认：
+
+- `http://127.0.0.1:5173`
+- `/api` 会代理到 `http://127.0.0.1:8000`
 
 如果你是开发者，项目结构、运行方式和约束请查看 `.claude/CLAUDE.md`。
