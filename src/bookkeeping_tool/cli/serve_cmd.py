@@ -22,7 +22,7 @@ def register(app: typer.Typer) -> None:
         if frontend_dist is None:
             fail("未找到可用的前端静态资源，请先构建前端产物后再执行 bookkeeping serve")
 
-        app_instance = create_app(resolved_project_root)
+        app_instance = create_app(resolved_project_root, frontend_dist=frontend_dist)
         base_url = f"http://{host}:{port}"
         typer.echo(f"Web UI: {base_url}/")
         typer.echo(f"Docs: {base_url}/docs")

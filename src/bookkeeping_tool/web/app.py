@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib import resources
+from importlib.abc import Traversable
 from pathlib import Path
 from typing import Iterable
 
@@ -16,21 +17,21 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PACKAGE_ROOT.parents[1]
 
 
-def _candidate_frontend_dirs() -> Iterable[object]:
-    yield resources.files("bookkeeping_tool.web.static")
+def _candidate_frontend_dirs() -> Iterable[Traversable | Path]:
+    yield resources.files("bookkeeping_tool.web").joinpath("static")
     yield SOURCE_ROOT / "frontend" / "dist"
 
 
-def resolve_frontend_dist() -> object | None:
+def resolve_frontend_dist() -> Traversable | Path | None:
     for candidate in _candidate_frontend_dirs():
         if candidate.joinpath("index.html").exists():
             return candidate
     return None
 
 
-def create_app(project_root: str | Path) -> FastAPI:
+def create_app(project_root: str | Path, frontend_dist: Traversable | Path | None = None) -> FastAPI:
     project_root = Path(project_root)
-    frontend_dist = resolve_frontend_dist()
+    frontend_dist = frontend_dist or resolve_frontend_dist()
 
     app = FastAPI(title="Bookkeeping Dashboard")
     app.add_middleware(
