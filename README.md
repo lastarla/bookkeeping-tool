@@ -45,6 +45,29 @@ bookkeeping --help
 
 如果你的 Python 环境受 PEP 668 限制，优先使用 `pipx` 或虚拟环境安装。
 
+## 卸载
+
+### 卸载 pipx 安装
+
+```bash
+pipx uninstall bookkeeping-tool
+```
+
+### 卸载虚拟环境安装
+
+如果你是在单独虚拟环境中安装的，直接退出并删除该虚拟环境即可：
+
+```bash
+deactivate
+rm -rf .venv
+```
+
+如果你只想在当前虚拟环境里卸载包：
+
+```bash
+python -m pip uninstall bookkeeping-tool
+```
+
 ## 文件命名规则
 
 导入时会从文件名提取来源信息：
