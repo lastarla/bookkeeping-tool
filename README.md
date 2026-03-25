@@ -151,6 +151,35 @@ sh ./scripts/build-release.sh
 3. 执行 `python -m build`
 4. 产出最终发布包到 `dist/`
 
+### 自动发版
+
+前置条件：
+
+- 已安装 `gh`
+- 已执行 `gh auth login`
+- `bookkeeping-tool` 和 `homebrew-tap` 都已配置 GitHub SSH push 权限
+- `homebrew-tap` 位于 `../homebrew-tap`
+- 两个仓库工作区都必须是干净状态
+
+使用方式：
+
+1. 先修改 `pyproject.toml` 中的版本号
+2. 在仓库根目录执行：
+
+```bash
+./scripts/release.sh
+```
+
+这个脚本会自动：
+
+1. 执行 `./scripts/build-release.sh`
+2. push `bookkeeping-tool` 当前分支
+3. 创建并 push 对应 tag
+4. 用 `gh` 创建 GitHub Release
+5. 下载 release tarball 并计算 sha256
+6. 更新 `../homebrew-tap/Formula/bookkeeping-tool.rb`
+7. 提交并 push `homebrew-tap`
+
 开发结构、运行方式、构建和发布流程见：
 
 - `.claude/CLAUDE.md`
