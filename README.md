@@ -6,16 +6,30 @@
 
 ## 安装
 
-推荐用 `pipx`：
+### 方式一：Homebrew（macOS 推荐）
 
 ```bash
-pipx install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
+brew install lastarla/tap/bookkeeping-tool
 ```
 
-如果你更适合 HTTPS：
+如果你已经添加过 tap，也可以直接：
+
+```bash
+brew install bookkeeping-tool
+```
+
+### 方式二：pipx
+
+推荐使用 HTTPS：
 
 ```bash
 pipx install "git+https://github.com/lastarla/bookkeeping-tool.git"
+```
+
+如果你已经配置了 GitHub SSH，也可以：
+
+```bash
+pipx install "git+ssh://git@github.com/lastarla/bookkeeping-tool.git"
 ```
 
 安装后验证：
