@@ -90,8 +90,12 @@ PY
 ensure_tag_absent() {
   local repo_dir="$1"
   local tag="$2"
-  git -C "$repo_dir" rev-parse "$tag" >/dev/null 2>&1 && fail "Tag already exists locally: $tag"
-  git -C "$repo_dir" ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1 && fail "Tag already exists on origin: $tag"
+  if git -C "$repo_dir" rev-parse "$tag" >/dev/null 2>&1; then
+    fail "Tag already exists locally: $tag"
+  fi
+  if git -C "$repo_dir" ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+    fail "Tag already exists on origin: $tag"
+  fi
 }
 
 generate_resource_block() {
@@ -576,13 +580,18 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+echo "==> Checking git repositories"
 ensure_git_repo "$ROOT_DIR"
 ensure_git_repo "$TAP_DIR"
+
+echo "==> Checking working tree cleanliness"
 ensure_clean_repo "$ROOT_DIR" "bookkeeping-tool"
 ensure_clean_repo "$TAP_DIR" "homebrew-tap"
 
+echo "==> Checking GitHub auth"
 gh auth status >/dev/null 2>&1 || fail "gh auth status failed; run 'gh auth login' first"
 
+echo "==> Checking tag availability"
 ensure_tag_absent "$ROOT_DIR" "$TAG"
 if [ "$SKIP_BUILD" -eq 0 ]; then
   echo "==> Building release artifacts"
