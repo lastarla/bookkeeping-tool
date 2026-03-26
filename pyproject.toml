@@ -106,3 +106,6 @@ exclude = ["server*", "frontend*", "build*", "dist*"]
 # `bookkeeping serve` 启动后，首页 HTML、favicon、assets 下的 js/css 都要直接从安装包里读取，
 # 所以这些静态文件也必须被一起打包。
 "bookkeeping_tool.web.static" = ["index.html", "favicon.svg", "assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

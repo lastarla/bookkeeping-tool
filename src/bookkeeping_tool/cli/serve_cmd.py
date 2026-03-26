@@ -3,10 +3,8 @@ from __future__ import annotations
 import webbrowser
 
 import typer
-import uvicorn
 
 from bookkeeping_tool.cli.common import fail, resolve_project_root
-from bookkeeping_tool.web.app import create_app, resolve_frontend_dist
 
 
 def register(app: typer.Typer) -> None:
@@ -17,6 +15,10 @@ def register(app: typer.Typer) -> None:
         project_root: str | None = typer.Option(None, "--project-root", help="运行数据根目录，默认使用环境变量或当前目录"),
         open_browser: bool = typer.Option(False, "--open", help="启动后打开浏览器"),
     ) -> None:
+        import uvicorn
+
+        from bookkeeping_tool.web.app import create_app, resolve_frontend_dist
+
         resolved_project_root = resolve_project_root(project_root)
         frontend_dist = resolve_frontend_dist()
         if frontend_dist is None:

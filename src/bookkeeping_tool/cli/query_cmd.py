@@ -5,7 +5,6 @@ from contextlib import closing
 import typer
 
 from bookkeeping_tool.cli.common import fail, open_connection, print_output, resolve_project_root
-from bookkeeping_tool.services.query_service import query_transactions
 
 
 def register(app: typer.Typer) -> None:
@@ -23,6 +22,8 @@ def register(app: typer.Typer) -> None:
         db: str | None = typer.Option(None, "--db", help="SQLite 数据库文件路径"),
         as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
     ) -> None:
+        from bookkeeping_tool.services.query_service import query_transactions
+
         resolved_project_root = resolve_project_root(project_root)
         try:
             with closing(open_connection(resolved_project_root, db)) as connection:

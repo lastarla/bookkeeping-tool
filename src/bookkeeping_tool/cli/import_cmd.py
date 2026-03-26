@@ -5,7 +5,6 @@ from pathlib import Path
 import typer
 
 from bookkeeping_tool.cli.common import fail, print_output, resolve_project_root, resolve_db_path
-from bookkeeping_tool.services.import_service import import_transactions
 
 
 def register(app: typer.Typer) -> None:
@@ -18,6 +17,8 @@ def register(app: typer.Typer) -> None:
         original_file_name: str | None = typer.Option(None, "--original-file-name", help="覆盖用于解析 owner/platform 的原始文件名"),
         as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
     ) -> None:
+        from bookkeeping_tool.services.import_service import import_transactions
+
         resolved_project_root = resolve_project_root(project_root)
         source_path = Path(file_path).expanduser().resolve()
         if not source_path.exists() or not source_path.is_file():

@@ -1,21 +1,28 @@
 from __future__ import annotations
 
+from importlib import import_module
+
 import typer
 
-from bookkeeping_tool.cli import import_cmd, inspect_cmd, query_cmd, reset_cmd, serve_cmd, summary_cmd
+COMMAND_MODULES = [
+    "bookkeeping_tool.cli.import_cmd",
+    "bookkeeping_tool.cli.query_cmd",
+    "bookkeeping_tool.cli.summary_cmd",
+    "bookkeeping_tool.cli.serve_cmd",
+    "bookkeeping_tool.cli.reset_cmd",
+    "bookkeeping_tool.cli.inspect_cmd",
+]
 
-app = typer.Typer(help="bookkeeping 本地记账工具 CLI")
 
-import_cmd.register(app)
-query_cmd.register(app)
-summary_cmd.register(app)
-serve_cmd.register(app)
-reset_cmd.register(app)
-inspect_cmd.register(app)
+def create_app() -> typer.Typer:
+    app = typer.Typer(help="bookkeeping 本地记账工具 CLI")
+    for module_name in COMMAND_MODULES:
+        import_module(module_name).register(app)
+    return app
 
 
 def main() -> None:
-    app()
+    create_app()()
 
 
 if __name__ == "__main__":

@@ -5,13 +5,6 @@ from contextlib import closing
 import typer
 
 from bookkeeping_tool.cli.common import fail, open_connection, print_output, resolve_project_root
-from bookkeeping_tool.services.dashboard_service import (
-    get_category_breakdown,
-    get_monthly_trend,
-    get_overview,
-    get_yearly_trend,
-    resolve_date_range,
-)
 
 summary_app = typer.Typer(help="汇总与概览命令")
 
@@ -33,6 +26,8 @@ def summary_overview(
     db: str | None = typer.Option(None, "--db", help="SQLite 数据库文件路径"),
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
 ) -> None:
+    from bookkeeping_tool.services.dashboard_service import get_overview, resolve_date_range
+
     resolved_project_root = resolve_project_root(project_root)
     try:
         start_date, end_date = resolve_date_range(view=view, month=month, year=year)
@@ -64,6 +59,8 @@ def summary_trend(
     db: str | None = typer.Option(None, "--db", help="SQLite 数据库文件路径"),
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
 ) -> None:
+    from bookkeeping_tool.services.dashboard_service import get_monthly_trend, get_yearly_trend
+
     resolved_project_root = resolve_project_root(project_root)
     try:
         with closing(open_connection(resolved_project_root, db)) as connection:
@@ -104,6 +101,8 @@ def summary_category(
     db: str | None = typer.Option(None, "--db", help="SQLite 数据库文件路径"),
     as_json: bool = typer.Option(False, "--json", help="输出 JSON"),
 ) -> None:
+    from bookkeeping_tool.services.dashboard_service import get_category_breakdown, resolve_date_range
+
     resolved_project_root = resolve_project_root(project_root)
     try:
         start_date, end_date = resolve_date_range(view=view, month=month, year=year)

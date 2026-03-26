@@ -16,7 +16,6 @@ from bookkeeping_tool.services.dashboard_service import (
     get_yearly_trend,
     resolve_date_range,
 )
-from bookkeeping_tool.services.import_service import import_transactions
 from bookkeeping_tool.services.query_service import query_transactions
 
 
@@ -203,6 +202,8 @@ def create_api_router(project_root: Path) -> APIRouter:
 
     @router.post("/import")
     async def import_bill(file: UploadFile = File(...)) -> dict:
+        from bookkeeping_tool.services.import_service import import_transactions
+
         suffix = Path(file.filename or "upload").suffix
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_file.write(await file.read())
