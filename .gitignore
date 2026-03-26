@@ -18,3 +18,7 @@ data/
 server/data/
 src/bookkeeping_tool/web/static/
 frontend/dist/
+.build-venv/
+pyinstaller-build/
+pyinstaller-dist/
+bookkeeping.spec

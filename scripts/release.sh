@@ -50,8 +50,8 @@ PYPROJECT_FILE="$ROOT_DIR/pyproject.toml"
 FORMULA_FILE="$TAP_DIR/Formula/bookkeeping-tool.rb"
 REPO="lastarla/bookkeeping-tool"
 CURRENT_BRANCH="$(git -C "$ROOT_DIR" branch --show-current)"
-RESOURCE_START="# BEGIN PYTHON RESOURCES"
-RESOURCE_END="# END PYTHON RESOURCES"
+MACOS_ARM64_ARTIFACT_NAME=""
+MACOS_ARM64_ARTIFACT_FILE=""
 
 fail() {
   echo "Error: $*" >&2
@@ -98,172 +98,61 @@ ensure_tag_absent() {
   fi
 }
 
-generate_resource_block() {
-  python3 - <<'PY' "$PYPROJECT_FILE"
-import ast
-import json
-import re
-import socket
-import subprocess
-import sys
-import tempfile
-import time
-import urllib.parse
-import urllib.request
-from functools import lru_cache
-from pathlib import Path
-
-PYPROJECT_FILE = Path(sys.argv[1])
-HTTP_TIMEOUT = 10
-HTTP_RETRIES = 3
-
-text = PYPROJECT_FILE.read_text()
-match = re.search(r'dependencies\s*=\s*\[(.*?)\n\]', text, re.S)
-if not match:
-    raise SystemExit("Unable to find dependencies in pyproject.toml")
-block = re.sub(r'^\s*#.*$', '', match.group(1), flags=re.M)
-requirements = ast.literal_eval("[" + block + "]")
-
-
-def normalize_name(name: str) -> str:
-    return re.sub(r"[-_.]+", "-", name).lower()
-
-
-@lru_cache(maxsize=None)
-def fetch_json(url: str, label: str):
-    last_error = None
-    for attempt in range(1, HTTP_RETRIES + 1):
-        print(f"FETCH {label} (attempt {attempt}/{HTTP_RETRIES})", file=sys.stderr)
-        try:
-            with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as resp:
-                return json.load(resp)
-        except urllib.error.HTTPError as exc:
-            raise SystemExit(f"Failed to fetch PyPI metadata for {label}: {url}: {exc}") from exc
-        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
-            last_error = exc
-            if attempt == HTTP_RETRIES:
-                break
-            time.sleep(attempt)
-        except Exception as exc:
-            raise SystemExit(f"Unexpected error while fetching PyPI metadata for {label}: {url}: {exc}") from exc
-    raise SystemExit(f"Failed to fetch PyPI metadata for {label}: {url}: {last_error}")
-
-
-def resolve_versions(requirements_list):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        requirements_file = tmpdir_path / "requirements.txt"
-        report_file = tmpdir_path / "report.json"
-        requirements_file.write_text("\n".join(requirements_list) + "\n")
-        command = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--dry-run",
-            "--ignore-installed",
-            "--quiet",
-            "--report",
-            str(report_file),
-            "-r",
-            str(requirements_file),
-        ]
-        print("RESOLVE dependencies with pip", file=sys.stderr)
-        result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode != 0:
-            details = result.stderr.strip() or result.stdout.strip() or "pip dependency resolution failed"
-            raise SystemExit(f"Failed to resolve Python dependencies: {details}")
-        report = json.loads(report_file.read_text())
-    versions = {}
-    for item in report.get("install", []):
-        metadata = item.get("metadata") or {}
-        name = metadata.get("name")
-        version = metadata.get("version")
-        if name and version:
-            versions[normalize_name(name)] = version
-    if not versions:
-        raise SystemExit("pip did not resolve any Python dependencies")
-    return versions
-
-
-def fetch_release(name: str, version: str):
-    encoded_name = urllib.parse.quote(name, safe="")
-    encoded_version = urllib.parse.quote(version, safe="")
-    url = f"https://pypi.org/pypi/{encoded_name}/{encoded_version}/json"
-    data = fetch_json(url, f"{name}=={version}")
-    urls = data.get("urls") or []
-    sdist = next((item for item in urls if item.get("packagetype") == "sdist"), None)
-    if sdist is None:
-        releases = data.get("releases", {})
-        sdist = next((item for item in releases.get(version, []) if item.get("packagetype") == "sdist"), None)
-    if sdist is None:
-        raise SystemExit(f"No sdist release found for {name}=={version}")
-    return sdist["url"], sdist["digests"]["sha256"]
-
-
-selected_versions = resolve_versions(requirements)
-resource_entries = {}
-for name, version in sorted(selected_versions.items()):
-    resource_url, resource_sha = fetch_release(name, version)
-    resource_entries[name] = {
-        "version": version,
-        "url": resource_url,
-        "sha256": resource_sha,
-    }
-
-print('# BEGIN PYTHON RESOURCES')
-for name in sorted(resource_entries):
-    entry = resource_entries[name]
-    print(f'  resource "{name}" do')
-    print(f'    url "{entry["url"]}"')
-    print(f'    sha256 "{entry["sha256"]}"')
-    print('  end')
-    print()
-print('# END PYTHON RESOURCES')
-print(f'# RESOURCE COUNT: {len(resource_entries)}', file=sys.stderr)
-PY
+artifact_name_from_version() {
+  local version="$1"
+  printf 'bookkeeping-tool-darwin-arm64-v%s.tar.gz' "$version"
 }
 
 update_formula() {
   local version="$1"
-  local sha="$2"
-  local resource_block="$3"
-  python3 - <<'PY' "$FORMULA_FILE" "$version" "$sha" "$resource_block" "$RESOURCE_START" "$RESOURCE_END"
+  local artifact_name="$2"
+  local artifact_sha="$3"
+  python3 - <<'PY' "$FORMULA_FILE" "$version" "$artifact_name" "$artifact_sha"
 import pathlib
 import re
 import sys
 
 formula = pathlib.Path(sys.argv[1])
 version = sys.argv[2]
-sha = sys.argv[3]
-resource_block = pathlib.Path(sys.argv[4]).read_text().rstrip() + "\n"
-resource_start = sys.argv[5]
-resource_end = sys.argv[6]
+artifact_name = sys.argv[3]
+artifact_sha = sys.argv[4]
 text = formula.read_text()
+new_text = f'''class BookkeepingTool < Formula
+  desc "Local bookkeeping data import and normalization tool"
+  homepage "https://github.com/lastarla/bookkeeping-tool"
+  license "MIT"
 
-updated = re.sub(
-    r'url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v[^"]+\.tar\.gz"',
-    f'url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v{version}.tar.gz"',
-    text,
-    count=1,
-)
-updated = re.sub(
-    r'(url "https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/v[^"]+\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}(")',
-    rf'\g<1>{sha}\2',
-    updated,
-    count=1,
-)
-pattern = re.compile(
-    rf'^[ \t]*{re.escape(resource_start)}\n.*?^[ \t]*{re.escape(resource_end)}',
-    re.S | re.M,
-)
-if not pattern.search(updated):
-    raise SystemExit("Formula resource block markers not found")
-updated = pattern.sub(resource_block.rstrip(), updated, count=1)
-updated += "\n" if not updated.endswith("\n") else ""
-if updated == text:
+  on_macos do
+    on_arm do
+      url "https://github.com/lastarla/bookkeeping-tool/releases/download/v{version}/{artifact_name}"
+      sha256 "{artifact_sha}"
+    end
+
+    on_intel do
+      odie "bookkeeping-tool Homebrew formula currently provides only a macOS arm64 release artifact"
+    end
+  end
+
+  on_linux do
+    odie "bookkeeping-tool Homebrew formula is currently macOS-only"
+  end
+
+  def install
+    bin.install "bookkeeping"
+  end
+
+  def post_install
+    chmod 0755, "#{{bin}}/bookkeeping"
+  end
+
+  test do
+    assert_match "bookkeeping 本地记账工具 CLI", shell_output("#{{bin}}/bookkeeping --help")
+  end
+end
+'''
+if new_text == text:
     raise SystemExit("Formula did not change; aborting")
-formula.write_text(updated)
+formula.write_text(new_text)
 PY
 }
 
@@ -280,37 +169,16 @@ require_command python3
 
 VERSION="$(version_from_pyproject)"
 TAG="v$VERSION"
-ARCHIVE_URL="https://github.com/lastarla/bookkeeping-tool/archive/refs/tags/$TAG.tar.gz"
-ARCHIVE_FILE="/tmp/bookkeeping-tool-$TAG.tar.gz"
-RESOURCE_FILE="/tmp/bookkeeping-tool-$TAG-resources.rb"
-RESOURCE_STDERR_FILE="/tmp/bookkeeping-tool-$TAG-resources.stderr"
+MACOS_ARM64_ARTIFACT_NAME="$(artifact_name_from_version "$VERSION")"
+MACOS_ARM64_ARTIFACT_FILE="$ROOT_DIR/dist/$MACOS_ARM64_ARTIFACT_NAME"
 TAP_BRANCH="$(git -C "$TAP_DIR" branch --show-current)"
 
 [ -n "$TAP_BRANCH" ] || fail "Could not determine homebrew-tap current branch"
 
 echo "==> Releasing version $VERSION from branch $CURRENT_BRANCH"
 echo "==> Tag: $TAG"
-echo "==> Archive URL: $ARCHIVE_URL"
+echo "==> Artifact: $MACOS_ARM64_ARTIFACT_NAME"
 echo "==> Tap repo: $TAP_DIR ($TAP_BRANCH)"
-
-echo "==> Generating Python resources"
-if ! generate_resource_block >"$RESOURCE_FILE" 2>"$RESOURCE_STDERR_FILE"; then
-  echo "Error: failed to generate Python resources" >&2
-  if [ -f "$RESOURCE_STDERR_FILE" ]; then
-    cat "$RESOURCE_STDERR_FILE" >&2
-  fi
-  exit 1
-fi
-RESOURCE_COUNT="$(python3 - <<'PY' "$RESOURCE_STDERR_FILE"
-import pathlib
-import re
-import sys
-text = pathlib.Path(sys.argv[1]).read_text()
-match = re.search(r'RESOURCE COUNT: (\d+)', text)
-print(match.group(1) if match else 'unknown')
-PY
-)"
-echo "==> Resource count: $RESOURCE_COUNT"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "==> Dry run: no changes will be published"
@@ -338,6 +206,10 @@ else
   echo "==> Skipping build step"
 fi
 
+[ -f "$MACOS_ARM64_ARTIFACT_FILE" ] || fail "Missing release artifact: $MACOS_ARM64_ARTIFACT_FILE"
+MACOS_ARM64_SHA256="$(shasum -a 256 "$MACOS_ARM64_ARTIFACT_FILE" | awk '{print $1}')"
+echo "==> Artifact sha256: $MACOS_ARM64_SHA256"
+
 echo "==> Pushing $CURRENT_BRANCH"
 git -C "$ROOT_DIR" push origin "$CURRENT_BRANCH"
 
@@ -349,20 +221,17 @@ echo "==> Creating GitHub release"
 gh release create "$TAG" \
   --repo "$REPO" \
   --title "$TAG" \
-  --notes "$RELEASE_NOTES"
-
-echo "==> Downloading release tarball"
-curl -L "$ARCHIVE_URL" -o "$ARCHIVE_FILE"
-SHA256="$(shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}')"
+  --notes "$RELEASE_NOTES" \
+  "$MACOS_ARM64_ARTIFACT_FILE"
 
 echo "==> Updating Homebrew formula"
-update_formula "$VERSION" "$SHA256" "$RESOURCE_FILE"
+update_formula "$VERSION" "$MACOS_ARM64_ARTIFACT_NAME" "$MACOS_ARM64_SHA256"
 
 git -C "$TAP_DIR" add Formula/bookkeeping-tool.rb
 git -C "$TAP_DIR" commit -m "$(cat <<EOF
 Update bookkeeping-tool formula to $TAG.
 
-Point the Homebrew formula at the published $TAG release tarball, refresh its sha256, and regenerate Python resources.
+Point the Homebrew formula at the published $TAG single-binary release tarball and refresh its sha256.
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 EOF
@@ -373,5 +242,5 @@ echo "==> Done"
 echo "Version: $VERSION"
 echo "Tag: $TAG"
 echo "Release: https://github.com/lastarla/bookkeeping-tool/releases/tag/$TAG"
-echo "Formula SHA256: $SHA256"
-echo "Resource count: $RESOURCE_COUNT"
+echo "Artifact: $MACOS_ARM64_ARTIFACT_NAME"
+echo "Formula SHA256: $MACOS_ARM64_SHA256"
