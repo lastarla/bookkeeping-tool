@@ -254,8 +254,8 @@ updated = re.sub(
     count=1,
 )
 pattern = re.compile(
-    rf'{re.escape(resource_start)}\n.*?\n{re.escape(resource_end)}',
-    re.S,
+    rf'^[ \t]*{re.escape(resource_start)}\n.*?^[ \t]*{re.escape(resource_end)}',
+    re.S | re.M,
 )
 if not pattern.search(updated):
     raise SystemExit("Formula resource block markers not found")
