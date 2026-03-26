@@ -104,17 +104,18 @@ import ast
 import json
 import re
 import socket
+import subprocess
 import sys
+import tempfile
+import time
 import urllib.parse
 import urllib.request
 from functools import lru_cache
 from pathlib import Path
 
 PYPROJECT_FILE = Path(sys.argv[1])
-PYTHON_VERSION = "3.12"
-TARGET_EXTRA = {"standard"}
-TARGET_SYS_PLATFORM = sys.platform
 HTTP_TIMEOUT = 10
+HTTP_RETRIES = 3
 
 text = PYPROJECT_FILE.read_text()
 match = re.search(r'dependencies\s*=\s*\[(.*?)\n\]', text, re.S)
@@ -123,358 +124,95 @@ if not match:
 block = re.sub(r'^\s*#.*$', '', match.group(1), flags=re.M)
 requirements = ast.literal_eval("[" + block + "]")
 
-OPS = [">=", "<=", "!=", "==", "~=", ">", "<"]
-PRE_RELEASE_RE = re.compile(r"[A-Za-z]")
-
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def split_version(version: str):
-    version = version.replace("-", ".")
-    version = re.sub(r"(?i)(a|b|rc|post|dev)", lambda m: "." + m.group(1).lower() + ".", version)
-    parts = re.split(r"[^0-9A-Za-z]+", version)
-    normalized = []
-    for part in parts:
-        if not part:
-            continue
-        if part.isdigit():
-            normalized.append((0, int(part)))
-        else:
-            normalized.append((1, part.lower()))
-    return tuple(normalized)
-
-
-def is_prerelease(version: str) -> bool:
-    return bool(PRE_RELEASE_RE.search(version))
-
-
-class MarkerParser:
-    def __init__(self, text: str):
-        self.tokens = self.tokenize(text)
-        self.index = 0
-
-    def tokenize(self, text: str):
-        tokens = []
-        i = 0
-        while i < len(text):
-            ch = text[i]
-            if ch.isspace():
-                i += 1
-                continue
-            if text.startswith("and", i) and self._boundary(text, i, 3):
-                tokens.append(("AND", "and"))
-                i += 3
-                continue
-            if text.startswith("or", i) and self._boundary(text, i, 2):
-                tokens.append(("OR", "or"))
-                i += 2
-                continue
-            if text.startswith("not", i) and self._boundary(text, i, 3):
-                tokens.append(("NOT", "not"))
-                i += 3
-                continue
-            if ch in "()":
-                tokens.append((ch, ch))
-                i += 1
-                continue
-            if text.startswith("==", i) or text.startswith("!=", i) or text.startswith(">=", i) or text.startswith("<=", i):
-                tokens.append(("OP", text[i:i+2]))
-                i += 2
-                continue
-            if ch in "<>":
-                tokens.append(("OP", ch))
-                i += 1
-                continue
-            if ch in {'"', "'"}:
-                quote = ch
-                i += 1
-                start = i
-                while i < len(text) and text[i] != quote:
-                    i += 1
-                if i >= len(text):
-                    raise SystemExit(f"Unterminated string in marker: {text}")
-                tokens.append(("STRING", text[start:i]))
-                i += 1
-                continue
-            start = i
-            while i < len(text) and re.match(r"[A-Za-z0-9_.-]", text[i]):
-                i += 1
-            if start == i:
-                raise SystemExit(f"Unexpected marker token near: {text[i:]}")
-            tokens.append(("IDENT", text[start:i]))
-        return tokens
-
-    def _boundary(self, text, start, size):
-        before = start == 0 or not re.match(r"[A-Za-z0-9_]", text[start - 1])
-        after_index = start + size
-        after = after_index >= len(text) or not re.match(r"[A-Za-z0-9_]", text[after_index])
-        return before and after
-
-    def current(self):
-        if self.index >= len(self.tokens):
-            return None
-        return self.tokens[self.index]
-
-    def eat(self, kind=None, value=None):
-        token = self.current()
-        if token is None:
-            raise SystemExit("Unexpected end of marker")
-        if kind is not None and token[0] != kind:
-            raise SystemExit(f"Expected {kind}, got {token}")
-        if value is not None and token[1] != value:
-            raise SystemExit(f"Expected {value}, got {token}")
-        self.index += 1
-        return token
-
-    def parse(self):
-        expr = self.parse_or()
-        if self.current() is not None:
-            raise SystemExit(f"Unexpected token in marker: {self.current()}")
-        return expr
-
-    def parse_or(self):
-        node = self.parse_and()
-        while self.current() and self.current()[0] == "OR":
-            self.eat("OR")
-            node = ("or", node, self.parse_and())
-        return node
-
-    def parse_and(self):
-        node = self.parse_not()
-        while self.current() and self.current()[0] == "AND":
-            self.eat("AND")
-            node = ("and", node, self.parse_not())
-        return node
-
-    def parse_not(self):
-        if self.current() and self.current()[0] == "NOT":
-            self.eat("NOT")
-            return ("not", self.parse_not())
-        return self.parse_atom()
-
-    def parse_atom(self):
-        token = self.current()
-        if token and token[0] == "(":
-            self.eat("(")
-            node = self.parse_or()
-            self.eat(")")
-            return node
-        ident = self.eat("IDENT")[1]
-        op = self.eat("OP")[1]
-        value = self.eat("STRING")[1]
-        return ("cmp", ident, op, value)
-
-
-def eval_marker(node, extra_context=None):
-    extra_context = extra_context or set()
-    kind = node[0]
-    if kind == "or":
-        return eval_marker(node[1], extra_context) or eval_marker(node[2], extra_context)
-    if kind == "and":
-        return eval_marker(node[1], extra_context) and eval_marker(node[2], extra_context)
-    if kind == "not":
-        return not eval_marker(node[1], extra_context)
-    _, ident, op, value = node
-    ident = ident.replace(".", "_")
-    if ident == "extra":
-        left = extra_context
-        return compare_extra(left, op, value)
-    if ident == "python_version":
-        left = PYTHON_VERSION
-    elif ident == "sys_platform":
-        left = TARGET_SYS_PLATFORM
-    else:
-        return True
-    return compare_value(left, op, value)
-
-
-def compare_extra(values, op, value):
-    if op == "==":
-        return value in values
-    if op == "!=":
-        return value not in values
-    return False
-
-
-def compare_value(left, op, right):
-    if op in {"==", "!="}:
-        result = left == right
-        return result if op == "==" else not result
-    left_key = split_version(left)
-    right_key = split_version(right)
-    if op == ">=":
-        return left_key >= right_key
-    if op == "<=":
-        return left_key <= right_key
-    if op == ">":
-        return left_key > right_key
-    if op == "<":
-        return left_key < right_key
-    if op == "~=":
-        parts = right.split(".")
-        if len(parts) == 1:
-            upper = str(int(parts[0]) + 1)
-        else:
-            prefix = parts[:-1]
-            prefix[-1] = str(int(prefix[-1]) + 1)
-            upper = ".".join(prefix)
-        return left_key >= right_key and left_key < split_version(upper)
-    return True
-
-
-def parse_requirement(raw: str):
-    raw = raw.strip()
-    marker = None
-    if ";" in raw:
-        raw, marker = [part.strip() for part in raw.split(";", 1)]
-    extras = set()
-    if "[" in raw and "]" in raw:
-        name_part, rest = raw.split("[", 1)
-        extras_text, remainder = rest.split("]", 1)
-        extras = {item.strip() for item in extras_text.split(",") if item.strip()}
-        raw = name_part + remainder
-    name = raw
-    specifiers = []
-    selected_op = None
-    spec_text = ""
-    match = re.match(r'^([A-Za-z0-9_.-]+)(.*)$', raw)
-    if not match:
-        raise SystemExit(f"Unable to parse requirement: {raw}")
-    name = match.group(1).strip()
-    spec_text = match.group(2).strip()
-    for op in OPS:
-        if spec_text.startswith(op):
-            selected_op = op
-            break
-    else:
-        name = raw.strip()
-    specifiers = []
-    if selected_op and spec_text.startswith(selected_op):
-        spec_text = spec_text[len(selected_op):]
-    if spec_text:
-        pieces = [piece.strip() for piece in spec_text.split(',') if piece.strip()]
-        if pieces:
-            first_piece = pieces[0]
-            specifiers.append((selected_op, first_piece.strip()))
-        for piece in pieces[1:]:
-            for candidate in OPS:
-                if piece.startswith(candidate):
-                    specifiers.append((candidate, piece[len(candidate):].strip()))
-                    break
-    marker_ast = MarkerParser(marker).parse() if marker else None
-    return {
-        'name': normalize_name(name),
-        'extras': extras,
-        'specifiers': specifiers,
-        'marker': marker_ast,
-        'raw': raw,
-    }
-
-
-def merge_specifiers(existing, incoming):
-    merged = list(existing)
-    for item in incoming:
-        if item not in merged:
-            merged.append(item)
-    return merged
-
-
-def version_satisfies(version, specifiers):
-    if is_prerelease(version):
-        return False
-    for op, expected in specifiers:
-        if not compare_value(version, op, expected):
-            return False
-    return True
-
-
 @lru_cache(maxsize=None)
-def fetch_package(name: str):
-    encoded = urllib.parse.quote(name, safe="")
-    url = f"https://pypi.org/pypi/{encoded}/json"
-    print(f"PROCESS {name}", file=sys.stderr)
-    try:
-        with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as resp:
-            return json.load(resp)
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, socket.timeout) as exc:
-        raise SystemExit(f"Failed to fetch PyPI metadata for {name}: {url}: {exc}") from exc
-    except Exception as exc:
-        raise SystemExit(f"Unexpected error while fetching PyPI metadata for {name}: {url}: {exc}") from exc
+def fetch_json(url: str, label: str):
+    last_error = None
+    for attempt in range(1, HTTP_RETRIES + 1):
+        print(f"FETCH {label} (attempt {attempt}/{HTTP_RETRIES})", file=sys.stderr)
+        try:
+            with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as exc:
+            raise SystemExit(f"Failed to fetch PyPI metadata for {label}: {url}: {exc}") from exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            last_error = exc
+            if attempt == HTTP_RETRIES:
+                break
+            time.sleep(attempt)
+        except Exception as exc:
+            raise SystemExit(f"Unexpected error while fetching PyPI metadata for {label}: {url}: {exc}") from exc
+    raise SystemExit(f"Failed to fetch PyPI metadata for {label}: {url}: {last_error}")
 
 
-def choose_release(name: str, specifiers):
-    data = fetch_package(name)
-    releases = data.get('releases', {})
-    candidates = []
-    for version, files in releases.items():
-        if not version_satisfies(version, specifiers):
-            continue
-        sdist = next((item for item in files if item.get('packagetype') == 'sdist'), None)
-        if not sdist:
-            continue
-        candidates.append((split_version(version), version, sdist))
-    if not candidates:
-        raise SystemExit(f"No stable sdist release found for {name} matching {specifiers}")
-    candidates.sort()
-    _, version, sdist = candidates[-1]
-    return version, sdist
+def resolve_versions(requirements_list):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        requirements_file = tmpdir_path / "requirements.txt"
+        report_file = tmpdir_path / "report.json"
+        requirements_file.write_text("\n".join(requirements_list) + "\n")
+        command = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--dry-run",
+            "--ignore-installed",
+            "--quiet",
+            "--report",
+            str(report_file),
+            "-r",
+            str(requirements_file),
+        ]
+        print("RESOLVE dependencies with pip", file=sys.stderr)
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            details = result.stderr.strip() or result.stdout.strip() or "pip dependency resolution failed"
+            raise SystemExit(f"Failed to resolve Python dependencies: {details}")
+        report = json.loads(report_file.read_text())
+    versions = {}
+    for item in report.get("install", []):
+        metadata = item.get("metadata") or {}
+        name = metadata.get("name")
+        version = metadata.get("version")
+        if name and version:
+            versions[normalize_name(name)] = version
+    if not versions:
+        raise SystemExit("pip did not resolve any Python dependencies")
+    return versions
 
 
-def evaluate_marker(marker_ast, extras):
-    if marker_ast is None:
-        return True
-    return eval_marker(marker_ast, extras)
+def fetch_release(name: str, version: str):
+    encoded_name = urllib.parse.quote(name, safe="")
+    encoded_version = urllib.parse.quote(version, safe="")
+    url = f"https://pypi.org/pypi/{encoded_name}/{encoded_version}/json"
+    data = fetch_json(url, f"{name}=={version}")
+    urls = data.get("urls") or []
+    sdist = next((item for item in urls if item.get("packagetype") == "sdist"), None)
+    if sdist is None:
+        releases = data.get("releases", {})
+        sdist = next((item for item in releases.get(version, []) if item.get("packagetype") == "sdist"), None)
+    if sdist is None:
+        raise SystemExit(f"No sdist release found for {name}=={version}")
+    return sdist["url"], sdist["digests"]["sha256"]
 
 
-constraints = {}
-selected_versions = {}
+selected_versions = resolve_versions(requirements)
 resource_entries = {}
-queue = []
-
-for requirement in requirements:
-    parsed = parse_requirement(requirement)
-    name = parsed['name']
-    entry = constraints.setdefault(name, {'specifiers': [], 'extras': set()})
-    entry['specifiers'] = merge_specifiers(entry['specifiers'], parsed['specifiers'])
-    entry['extras'].update(parsed['extras'])
-    queue.append(name)
-
-processed = set()
-while queue:
-    name = queue.pop(0)
-    entry = constraints[name]
-    version, sdist = choose_release(name, entry['specifiers'])
-    previous_version = selected_versions.get(name)
-    selected_versions[name] = version
+for name, version in sorted(selected_versions.items()):
+    resource_url, resource_sha = fetch_release(name, version)
     resource_entries[name] = {
-        'version': version,
-        'url': sdist['url'],
-        'sha256': sdist['digests']['sha256'],
+        "version": version,
+        "url": resource_url,
+        "sha256": resource_sha,
     }
-    if name in processed and previous_version == version:
-        continue
-    processed.add(name)
-    package = fetch_package(name)
-    requires_dist = package['info'].get('requires_dist') or []
-    active_extras = set(entry['extras'])
-    for raw_req in requires_dist:
-        parsed = parse_requirement(raw_req)
-        if not evaluate_marker(parsed['marker'], active_extras):
-            continue
-        dep_name = parsed['name']
-        dep_entry = constraints.setdefault(dep_name, {'specifiers': [], 'extras': set()})
-        before = (tuple(dep_entry['specifiers']), tuple(sorted(dep_entry['extras'])))
-        dep_entry['specifiers'] = merge_specifiers(dep_entry['specifiers'], parsed['specifiers'])
-        dep_entry['extras'].update(parsed['extras'])
-        after = (tuple(dep_entry['specifiers']), tuple(sorted(dep_entry['extras'])))
-        if before != after or dep_name not in processed:
-            queue.append(dep_name)
 
-names = sorted(resource_entries)
 print('# BEGIN PYTHON RESOURCES')
-for name in names:
+for name in sorted(resource_entries):
     entry = resource_entries[name]
     print(f'  resource "{name}" do')
     print(f'    url "{entry["url"]}"')
@@ -482,7 +220,7 @@ for name in names:
     print('  end')
     print()
 print('# END PYTHON RESOURCES')
-print(f'# RESOURCE COUNT: {len(names)}', file=sys.stderr)
+print(f'# RESOURCE COUNT: {len(resource_entries)}', file=sys.stderr)
 PY
 }
 
