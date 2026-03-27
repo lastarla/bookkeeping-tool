@@ -8,6 +8,8 @@ COMMAND_MODULES = [
     "bookkeeping_tool.cli.import_cmd",
     "bookkeeping_tool.cli.query_cmd",
     "bookkeeping_tool.cli.summary_cmd",
+    "bookkeeping_tool.cli.record_cmd",
+    "bookkeeping_tool.cli.budget_cmd",
     "bookkeeping_tool.cli.serve_cmd",
     "bookkeeping_tool.cli.reset_cmd",
     "bookkeeping_tool.cli.inspect_cmd",

@@ -9,7 +9,7 @@ def create_transaction(
     connection: sqlite3.Connection,
     *,
     batch_id: int,
-    raw_row_id: int,
+    raw_row_id: int | None,
     record: TransactionRecord,
     created_at: str,
 ) -> int:

@@ -38,6 +38,15 @@ def open_connection(project_root: Path, db_path: str | None = None) -> sqlite3.C
     return connection
 
 
+def parse_json_input(value: str | None) -> dict[str, Any]:
+    if not value:
+        return {}
+    loaded = json.loads(value)
+    if not isinstance(loaded, dict):
+        raise ValueError("JSON 输入必须是对象")
+    return loaded
+
+
 def print_output(data: Any, *, as_json: bool) -> None:
     if as_json:
         typer.echo(json.dumps(data, ensure_ascii=False, indent=2))

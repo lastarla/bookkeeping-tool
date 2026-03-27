@@ -74,6 +74,14 @@ class CliSmokeTests(unittest.TestCase):
         self.assertEqual(summary_help.returncode, 0, msg=summary_help.stderr)
         self.assertIn("overview", summary_help.stdout)
 
+        record_help = run_cli("record", "--help")
+        self.assertEqual(record_help.returncode, 0, msg=record_help.stderr)
+        self.assertIn("expense", record_help.stdout)
+
+        budget_help = run_cli("budget", "--help")
+        self.assertEqual(budget_help.returncode, 0, msg=budget_help.stderr)
+        self.assertIn("set", budget_help.stdout)
+
     def test_import_query_and_summary_flow(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -91,10 +99,56 @@ class CliSmokeTests(unittest.TestCase):
             self.assertEqual(imported_payload["status"], "success")
             self.assertEqual(imported_payload["imported_rows"], 2)
 
+            budget = run_cli(
+                "budget",
+                "set",
+                "--scope",
+                "month",
+                "--period",
+                "2025-03",
+                "--amount",
+                "20",
+                "--owner",
+                "alice",
+                "--platform",
+                "alipay",
+                "--project-root",
+                str(tmp_path),
+                "--json",
+            )
+            self.assertEqual(budget.returncode, 0, msg=budget.stderr)
+            budget_payload = json.loads(budget.stdout)
+            self.assertEqual(budget_payload["scope"], "month")
+
+            recorded = run_cli(
+                "record",
+                "expense",
+                "--trade-date",
+                "2025-03-03",
+                "--amount",
+                "8",
+                "--owner",
+                "alice",
+                "--platform",
+                "alipay",
+                "--category",
+                "餐饮",
+                "--note",
+                "午饭",
+                "--project-root",
+                str(tmp_path),
+                "--json",
+            )
+            self.assertEqual(recorded.returncode, 0, msg=recorded.stderr)
+            recorded_payload = json.loads(recorded.stdout)
+            self.assertEqual(recorded_payload["direction"], "expense")
+            self.assertEqual(recorded_payload["category"], "餐饮")
+            self.assertEqual(len(recorded_payload["budget_checks"]), 3)
+
             queried = run_cli("query", "--project-root", str(tmp_path), "--limit", "5", "--json")
             self.assertEqual(queried.returncode, 0, msg=queried.stderr)
             queried_payload = json.loads(queried.stdout)
-            self.assertEqual(len(queried_payload), 2)
+            self.assertEqual(len(queried_payload), 3)
 
             summary = run_cli(
                 "summary",
@@ -111,6 +165,123 @@ class CliSmokeTests(unittest.TestCase):
             summary_payload = json.loads(summary.stdout)
             self.assertIn("total_expense", summary_payload)
             self.assertIn("total_income", summary_payload)
+
+    def test_category_fallback_and_budget_reminders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+
+            unset_record = run_cli(
+                "record",
+                "expense",
+                "--trade-date",
+                "2025-03-10",
+                "--amount",
+                "20",
+                "--owner",
+                "alice",
+                "--platform",
+                "wechat",
+                "--category",
+                "随便写的分类",
+                "--project-root",
+                str(tmp_path),
+                "--json",
+            )
+            self.assertEqual(unset_record.returncode, 0, msg=unset_record.stderr)
+            unset_payload = json.loads(unset_record.stdout)
+            self.assertEqual(unset_payload["category"], "其他支出")
+            self.assertEqual(len(unset_payload["reminders"]), 3)
+            self.assertEqual({item["status"] for item in unset_payload["reminders"]}, {"unset"})
+
+            budget = run_cli(
+                "budget",
+                "set",
+                "--scope",
+                "month",
+                "--period",
+                "2025-03",
+                "--amount",
+                "100",
+                "--owner",
+                "alice",
+                "--platform",
+                "wechat",
+                "--project-root",
+                str(tmp_path),
+                "--json",
+            )
+            self.assertEqual(budget.returncode, 0, msg=budget.stderr)
+            budget_payload = json.loads(budget.stdout)
+            self.assertEqual(budget_payload["scope_label"], "月")
+            self.assertIsNone(budget_payload["reminder"])
+
+            warning_record = run_cli(
+                "record",
+                "expense",
+                "--trade-date",
+                "2025-03-11",
+                "--amount",
+                "61",
+                "--owner",
+                "alice",
+                "--platform",
+                "wechat",
+                "--category",
+                "餐饮",
+                "--project-root",
+                str(tmp_path),
+                "--json",
+            )
+            self.assertEqual(warning_record.returncode, 0, msg=warning_record.stderr)
+            warning_payload = json.loads(warning_record.stdout)
+            month_warning = next(item for item in warning_payload["reminders"] if item["scope"] == "month")
+            self.assertEqual(month_warning["status"], "warning")
+            self.assertEqual(month_warning["severity"], "warning")
+            self.assertIn("月预算已达到80%", month_warning["channel_text"])
+
+            exceeded_record = run_cli(
+                "record",
+                "expense",
+                "--trade-date",
+                "2025-03-12",
+                "--amount",
+                "30",
+                "--owner",
+                "alice",
+                "--platform",
+                "wechat",
+                "--category",
+                "交通",
+                "--project-root",
+                str(tmp_path),
+                "--json",
+            )
+            self.assertEqual(exceeded_record.returncode, 0, msg=exceeded_record.stderr)
+            exceeded_payload = json.loads(exceeded_record.stdout)
+            month_exceeded = next(item for item in exceeded_payload["reminders"] if item["scope"] == "month")
+            self.assertEqual(month_exceeded["status"], "exceeded")
+            self.assertEqual(month_exceeded["severity"], "critical")
+            self.assertIn("月预算已超限", month_exceeded["channel_text"])
+
+            budget_check = run_cli(
+                "budget",
+                "check",
+                "--scope",
+                "month",
+                "--trade-date",
+                "2025-03-12",
+                "--owner",
+                "alice",
+                "--platform",
+                "wechat",
+                "--project-root",
+                str(tmp_path),
+                "--json",
+            )
+            self.assertEqual(budget_check.returncode, 0, msg=budget_check.stderr)
+            budget_check_payload = json.loads(budget_check.stdout)
+            self.assertEqual(budget_check_payload["status"], "exceeded")
+            self.assertEqual(budget_check_payload["severity"], "critical")
 
     def test_serve_routes_are_reachable(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,6 +311,8 @@ class CliSmokeTests(unittest.TestCase):
                         with urlopen(f"http://127.0.0.1:{port}/docs", timeout=1) as response:
                             self.assertEqual(response.status, 200)
                         with urlopen(f"http://127.0.0.1:{port}/api/meta/default-period", timeout=1) as response:
+                            self.assertEqual(response.status, 200)
+                        with urlopen(f"http://127.0.0.1:{port}/api/budget/check?scope=month&trade_date=2025-03-01", timeout=1) as response:
                             self.assertEqual(response.status, 200)
                         break
                     except Exception as exc:  # noqa: BLE001
