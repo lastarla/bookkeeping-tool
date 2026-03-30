@@ -103,7 +103,65 @@ bookkeeping query --project-root ./bookkeeping-tool-data --limit 5 --json
 bookkeeping summary overview --project-root ./bookkeeping-tool-data --view monthly --month 2025-03 --json
 ```
 
-### 4. 启动本地页面
+### 4. 手工记录单笔支出/收入
+
+记录支出：
+
+```bash
+bookkeeping record expense \
+  --trade-date 2025-03-27 \
+  --amount 20 \
+  --owner alice \
+  --platform wechat \
+  --category 餐饮 \
+  --note 午饭 \
+  --project-root ./bookkeeping-tool-data \
+  --json
+```
+
+记录收入：
+
+```bash
+bookkeeping record income \
+  --trade-date 2025-03-27 \
+  --amount 100 \
+  --owner alice \
+  --platform alipay \
+  --category 报销 \
+  --project-root ./bookkeeping-tool-data \
+  --json
+```
+
+也支持通过 `--payload` 传 JSON，便于 OpenClaw 或其他上层调用。
+
+### 5. 设置与检查预算
+
+设置月预算：
+
+```bash
+bookkeeping budget set \
+  --scope month \
+  --period 2025-03 \
+  --amount 1000 \
+  --owner alice \
+  --platform wechat \
+  --project-root ./bookkeeping-tool-data \
+  --json
+```
+
+检查预算：
+
+```bash
+bookkeeping budget check \
+  --scope month \
+  --trade-date 2025-03-27 \
+  --owner alice \
+  --platform wechat \
+  --project-root ./bookkeeping-tool-data \
+  --json
+```
+
+### 6. 启动本地页面
 
 ```bash
 bookkeeping serve --project-root ./bookkeeping-tool-data
@@ -114,7 +172,7 @@ bookkeeping serve --project-root ./bookkeeping-tool-data
 - `http://127.0.0.1:8000/`
 - `http://127.0.0.1:8000/docs`
 
-### 5. 清空数据库
+### 7. 清空数据库
 
 ```bash
 bookkeeping reset --project-root ./bookkeeping-tool-data --yes
@@ -133,9 +191,14 @@ bookkeeping import ./material/example_alipay.csv --project-root ./bookkeeping-to
 - 导入 `.csv` 和 `.xlsx` 账单
 - 保存原始行和标准化交易
 - 基于文件 hash 做重复导入判断
+- 手工记录单笔收入 / 支出
+- 支持固定分类集合，并在非法分类时回退到默认分类
+- 支持按日 / 月 / 年设置支出预算
+- 在创建支出后返回结构化预算状态与提醒结果
 - 按日期、owner、platform、direction、category 查询
 - 按 month / category / owner / platform / direction 汇总
 - 通过 Web 页面查看概览、分类、趋势和交易明细
+- 提供 Web API：导入、记账、预算设置与预算检查
 
 ## 开发说明
 

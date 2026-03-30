@@ -5,6 +5,7 @@ from contextlib import closing
 import tempfile
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel
 
 from bookkeeping_tool.db import connect, get_default_db_path, init_db
 from bookkeeping_tool.services.dashboard_service import (
@@ -17,6 +18,27 @@ from bookkeeping_tool.services.dashboard_service import (
     resolve_date_range,
 )
 from bookkeeping_tool.services.query_service import query_transactions
+
+
+class RecordPayload(BaseModel):
+    trade_date: str
+    amount: float
+    direction: str
+    owner: str
+    platform: str | None = None
+    category: str | None = None
+    transaction_type: str | None = None
+    currency: str = "CNY"
+    note: str | None = None
+
+
+class BudgetPayload(BaseModel):
+    scope: str
+    period_key: str
+    amount: float
+    owner: str | None = None
+    platform: str | None = None
+    currency: str = "CNY"
 
 
 def list_owners(connection) -> list[str]:
@@ -199,6 +221,69 @@ def create_api_router(project_root: Path) -> APIRouter:
                 limit=limit,
             )
         )
+
+    @router.post("/record")
+    def create_record(payload: RecordPayload) -> dict:
+        from bookkeeping_tool.services.record_service import create_manual_transaction
+
+        try:
+            return with_connection(
+                lambda connection: create_manual_transaction(
+                    connection,
+                    trade_date=payload.trade_date,
+                    amount=payload.amount,
+                    direction=payload.direction,
+                    owner=payload.owner,
+                    platform=payload.platform,
+                    category=payload.category,
+                    transaction_type=payload.transaction_type,
+                    currency=payload.currency,
+                    note=payload.note,
+                )
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/budget")
+    def save_budget(payload: BudgetPayload) -> dict:
+        from bookkeeping_tool.services.budget_service import set_budget
+
+        try:
+            return with_connection(
+                lambda connection: set_budget(
+                    connection,
+                    scope=payload.scope,
+                    period_key=payload.period_key,
+                    amount=payload.amount,
+                    owner=payload.owner,
+                    platform=payload.platform,
+                    currency=payload.currency,
+                )
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/budget/check")
+    def check_budget(
+        scope: str = Query(..., pattern="^(day|month|year)$"),
+        trade_date: str = Query(...),
+        owner: str | None = None,
+        platform: str | None = None,
+    ) -> dict:
+        from bookkeeping_tool.services.budget_service import get_budget_status
+
+        try:
+            return with_connection(
+                lambda connection: get_budget_status(
+                    connection,
+                    scope=scope,
+                    trade_date=trade_date,
+                    owner=owner,
+                    platform=platform,
+                )
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/import")
     async def import_bill(file: UploadFile = File(...)) -> dict:

@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS transactions (
     FOREIGN KEY(batch_id) REFERENCES import_batches(id),
     FOREIGN KEY(raw_row_id) REFERENCES raw_rows(id)
 );
+
+CREATE TABLE IF NOT EXISTS budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,
+    period_key TEXT NOT NULL,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    owner TEXT,
+    platform TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(scope, period_key, owner, platform)
+);
 """
 
 

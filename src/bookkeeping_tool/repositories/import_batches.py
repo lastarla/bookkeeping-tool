@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
+import uuid
 
 
 def get_batch_by_hash(connection: sqlite3.Connection, file_hash: str):
@@ -51,3 +53,8 @@ def update_batch_stats(
         """,
         (status, total_rows, imported_rows, skipped_rows, batch_id),
     )
+
+
+def build_manual_batch_hash(*, trade_date: str, direction: str, amount: float, owner: str, platform: str | None, note: str | None) -> str:
+    raw = "|".join([trade_date, direction, f"{amount:.2f}", owner, platform or "", note or "", uuid.uuid4().hex])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
